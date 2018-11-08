@@ -1,0 +1,14 @@
+# Maven build directory
+target/
+
+# Node installation local to this package. Produced by Maven build.
+node/
+# Node modules
+node_modules/
+
+# Code editor related stuff
+.classpath
+.project
+.vscode
+.settings
+
