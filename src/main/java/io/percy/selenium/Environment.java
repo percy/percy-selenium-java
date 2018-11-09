@@ -68,6 +68,6 @@ class Environment {
     String os = cap.getPlatform().toString();
     String browserName = cap.getBrowserName().toLowerCase();
     String version = cap.getVersion().toString();
-    return String.format("selenium-java/%s/%s/%s", os, browserName, version);
+    return String.format("selenium-java; %s; %s/%s", os, browserName, version);
   }
 }

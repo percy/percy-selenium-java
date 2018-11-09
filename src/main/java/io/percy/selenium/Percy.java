@@ -41,6 +41,19 @@ public class Percy {
         this.environmentDictString = new Environment(driver).getInfoDict();
     }
 
+    /**
+     * Attempts to load percy-agent.js from the resources in this Jar. The file
+     * comes from the node module @percy/agent, which is installed and packaged into
+     * this Jar as part of the Maven build.
+     *
+     * Bundling the percy-agent.js file with this library does run the minor risk of
+     * a future incompatibility between the bundled percy-agent.js in this library,
+     * and the version of @percy/agent being run by the library's client.
+     *
+     * An alternative to consider would be to try to load percy-agent.js at runtime
+     * from a running percy agent server on the standard port.
+     */
+    @Nullable
     private String loadPercyAgentJs() {
         try {
             return new String(getClass().getClassLoader().getResourceAsStream(AGENTJS_FILE).readAllBytes());
