@@ -1,4 +1,4 @@
-package io.percy.selenium;
+package io.percy;
 
 import java.util.ArrayList;
 import java.util.Arrays;
