@@ -1,4 +1,4 @@
-package io.percy;
+package io.percy.selenium;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -14,7 +14,7 @@ import org.openqa.selenium.remote.RemoteWebDriver;
  */
 class Environment {
 
-  private static final String PROPS_PATH = "META-INF/maven/io.percy/percy-java-selenium/pom.properties";
+  private static final String PROPS_PATH = "META-INF/maven/io.percy.selenium/percy-java-selenium/pom.properties";
   private final static String DEFAULT_ARTIFACTID = "percy-java-selenium";
   private final static String UNKNOWN_VERSION = "unknown";
   private WebDriver driver;
