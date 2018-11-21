@@ -1,4 +1,7 @@
 # percy-java-selenium
+
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.percy/percy-java-selenium/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.percy/percy-java-selenium)
+
 Java Selenium library for visual regression testing with Percy.
 
 ## Building and packaging
