@@ -5,9 +5,11 @@
     2. Create a local file `~/.m2/settings.xml` containing our OSSRH credentials.
     3. If you have 2-factor auth on your GitHub account, make sure you have a GitHub personal access token for authenticating on the command line over HTTPS.
 2. Run `./release.sh`.
-3. Follow the prompts to set new versions, tags, etc. The Maven release process will make tag and release commits to GitHub on your behalf.
+3. Follow the prompts to set new versions and tags. The Maven release process will make tag and release commits to GitHub on your behalf. You will also be prompted for the GPG key passphrase, and for
 4. Verify that your new release has been successfully uploaded at https://oss.sonatype.org/content/repositories/releases/io/percy/
 5. Verify the release tags on GitHub: https://github.com/percy/percy-java-selenium/releases
+
+----------
 
 For more details on the steps above, and for instructions on more manual release that allows you to inspect contents before promoting your staged release, see the sections below.
 
@@ -48,7 +50,7 @@ Import the key into your local gpg keyring:
 $ gpg --import secret-percy-release-key.asc
 ```
 
-It will prompt you for the key passphrase, which you can also find in 1password.
+It will prompt you for the key passphrase, which you can also find in 1password. Search for "Java release private key".
 
 ### Create a local settings.xml with our Sonatype credentials
 
@@ -122,6 +124,8 @@ The private key has an expiry date. When it expires, it can be either extended, 
 If the secret key or passphrase gets lost, a new keypair can be created and the new public key distributed.
 
 Detailed instructions on creating a new keypair or extending the validity of an expired key can be found here: https://central.sonatype.org/pages/working-with-pgp-signatures.html
+
+Should it be necessary, the private key's revocation certificate can also be found in 1password (search for "Java release private key").
 
 ### Maven Central / Sonatype OSSRH documentation
 
