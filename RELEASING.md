@@ -3,6 +3,7 @@
 1. One-time setup:
     1. Install GPG and import the private signing key.
     2. Create a local file `~/.m2/settings.xml` containing our OSSRH credentials.
+    3. If you have 2-factor auth on your GitHub account, make sure you have a GitHub personal access token for authenticating on the command line over HTTPS.
 2. Run `./release.sh`.
 3. Follow the prompts to set new versions, tags, etc. The Maven release process will make tag and release commits to GitHub on your behalf.
 4. Verify that your new release has been successfully uploaded at https://oss.sonatype.org/content/repositories/releases/io/percy/
@@ -15,6 +16,7 @@ For more details on the steps above, and for instructions on more manual release
   - [Install GPG](#install-gpg)
   - [Import the private signing key](#import-the-private-signing-key)
   - [Create a local settings.xml with our Sonatype credentials](#create-a-local-settingsxml-with-our-sonatype-credentials)
+  - [Create a GitHub personal access token](#create-a-github-personal-access-token)
 - [Making a full release from the command line](#making-a-full-release-from-the-command-line)
 - [Making a new deployment, inspecting and releasing manually in the Nexus Registry](#making-a-new-deployment-inspecting-and-releasing-manually-in-the-nexus-registry)
   - [Build the artifacts and upload to the Sonatype staging repository](#build-the-artifacts-and-upload-to-the-sonatype-staging-repository)
@@ -68,6 +70,12 @@ Create a local `settings.xml` file, placed in `~/.m2/settings.xml`, which will c
 The username and token can be generated from https://oss.sonatype.org. Log in with the percy-io credentials, then go to the top right menu (appears clicking on your username) > Profile > select "User token" from the dropdown that also has a "Summary" section. Hit "Access User Token" to get the username and token to use in this file. The token can also be regenerated from this UI, should that ever be necessary.
 
 For detailed documentation on the format of `settings.xml`, see: http://maven.apache.org/ref/3.6.0/maven-settings/settings.html
+
+### Create a GitHub personal access token
+
+The release process will commit and push to GitHub updated version numbers and tags. For this, it will require your GitHub username and password. If you have two-factor authentication on your GitHub account, you will need to get a personal access token from GitHub, and use that instead of your password when prompted during the release process.
+
+To create a GitHub personal access token, follow the instructions here: https://help.github.com/articles/creating-a-personal-access-token-for-the-command-line/
 
 ## Making a full release from the command line
 
