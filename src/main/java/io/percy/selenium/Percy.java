@@ -1,5 +1,6 @@
 package io.percy.selenium;
 
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -56,7 +57,10 @@ public class Percy {
     @Nullable
     private String loadPercyAgentJs() {
         try {
-            return new String(getClass().getClassLoader().getResourceAsStream(AGENTJS_FILE).readAllBytes());
+            InputStream stream = getClass().getClassLoader().getResourceAsStream(AGENTJS_FILE);
+            byte[] agentBytes = new byte[stream.available()];
+            stream.read(agentBytes);
+            return new String(agentBytes);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Something went wrong trying to load {}. Snapshotting will not work.",
                     AGENTJS_FILE);
@@ -68,7 +72,7 @@ public class Percy {
      * Take a snapshot and upload it to Percy.
      *
      * @param name The human-readable name of the snapshot. Should be unique.
-     */
+     *
     public void snapshot(String name) {
         snapshot(name, null, null);
     }

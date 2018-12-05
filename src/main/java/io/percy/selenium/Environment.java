@@ -6,7 +6,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 
 import org.openqa.selenium.Capabilities;
+import org.openqa.selenium.HasCapabilities;
 import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WrapsDriver;
 import org.openqa.selenium.remote.RemoteWebDriver;
 
 /**
@@ -64,10 +66,21 @@ class Environment {
   }
 
   private String getEnvironmentInfo() {
-    Capabilities cap = ((RemoteWebDriver) this.driver).getCapabilities();
-    String os = cap.getPlatform().toString();
-    String browserName = cap.getBrowserName().toLowerCase();
-    String version = cap.getVersion().toString();
-    return String.format("selenium-java; %s; %s/%s", os, browserName, version);
+    // If this is a wrapped driver, get the actual driver that this one wraps.
+    WebDriver innerDriver = this.driver instanceof WrapsDriver ?
+      ((WrapsDriver) this.driver).getWrappedDriver()
+      : this.driver;
+
+    // If this is a driver with Capabilities, use those to report on our environment info.
+    if (innerDriver instanceof HasCapabilities) {
+      Capabilities cap = ((HasCapabilities) this.driver).getCapabilities();
+      String os = cap.getPlatform().toString();
+      String browserName = cap.getBrowserName().toLowerCase();
+      String version = cap.getVersion().toString();
+      return String.format("selenium-java; %s; %s/%s", os, browserName, version);
+    }
+
+    // We don't know this type of driver. Report its classname as environment info.
+    return String.format("selenium-java; unknownDriver; %", innerDriver.getClass().getName());
   }
 }
