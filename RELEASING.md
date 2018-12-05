@@ -96,7 +96,7 @@ Follow the prompts to provide new version numbers and tags.
 To make a new release, edit the version number in pom.xml to be the version number that you want, then run:
 
 ```bash
-$ mvn clean deploy
+$ export GPG_TTY=$(tty) && mvn clean deploy
 ```
 
 This will create a release candidate, and upload it to the staging servers for Maven Central.
