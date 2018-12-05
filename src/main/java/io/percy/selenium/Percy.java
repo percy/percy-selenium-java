@@ -73,6 +73,7 @@ public class Percy {
      *
      * @param name The human-readable name of the snapshot. Should be unique.
      *
+     */
     public void snapshot(String name) {
         snapshot(name, null, null);
     }
@@ -84,7 +85,7 @@ public class Percy {
      * @param widths The browser widths at which you want to take the snapshot. In
      *               pixels.
      */
-    public void snapshot(String name, @Nullable List<Integer> widths) {
+    public void snapshot(String name, List<Integer> widths) {
         snapshot(name, widths, null);
     }
 
@@ -96,7 +97,7 @@ public class Percy {
      *                  In pixels.
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      */
-    public void snapshot(String name, @Nullable List<Integer> widths, @Nullable Integer minHeight) {
+    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight) {
         if (percyAgentJs == null) {
             // This would happen if we couldn't load percy-agent.js in the constructor.
             LOGGER.log(Level.WARNING, "percy-agent.js is not available. Snapshotting is disabled.");
