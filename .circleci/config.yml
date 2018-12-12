@@ -1,0 +1,9 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/openjdk:8-node-browsers
+    steps:
+      - checkout
+      - run: npm install
+      - run: ./run-snapshots.sh
