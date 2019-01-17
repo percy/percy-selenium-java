@@ -81,6 +81,6 @@ class Environment {
     }
 
     // We don't know this type of driver. Report its classname as environment info.
-    return String.format("selenium-java; unknownDriver; %", innerDriver.getClass().getName());
+    return String.format("selenium-java; unknownDriver; %s", innerDriver.getClass().getName());
   }
 }
