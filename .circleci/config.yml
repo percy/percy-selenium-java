@@ -10,7 +10,7 @@ jobs:
   openjdk_8_with_percy:
     # We've opted this OpenJDK version to be the one that runs and reports Percy's status
     docker:
-      - image: circleci/openjdk:10-node-browsers
+      - image: circleci/openjdk:8-node-browsers
     <<: *default_steps
   openjdk_11:
     docker:
