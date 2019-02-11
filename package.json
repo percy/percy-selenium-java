@@ -1,7 +1,7 @@
 {
   "private": true,
   "devDependencies": {
-    "@percy/agent": "^0.1.0",
+    "@percy/agent": "^0.1.14",
     "har-validator": "^5.1.3"
   }
 }
