@@ -5,7 +5,7 @@
 
   <groupId>io.percy</groupId>
   <artifactId>percy-java-selenium</artifactId>
-  <version>0.0.5-SNAPSHOT</version>
+  <version>0.0.5</version>
   <packaging>jar</packaging>
 
   <name>${project.groupId}:${project.artifactId}</name>
@@ -32,7 +32,7 @@
     <connection>scm:git:git://github.com/percy/percy-java-selenium.git</connection>
     <developerConnection>scm:git:https://github.com/percy/percy-java-selenium.git</developerConnection>
     <url>https://github.com/percy/percy-java-selenium/tree/master</url>
-    <tag>percy-java-selenium-0.0.1</tag>
+    <tag>percy-java-selenium-0.0.5</tag>
   </scm>
 
   <properties>
