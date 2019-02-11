@@ -1,9 +1,27 @@
-version: 2
+version: 2.1
+
+default_steps: &default_steps
+  steps:
+    - checkout
+    - run: npm ci
+    - run: ./run-snapshots.sh
+
 jobs:
-  build:
+  openjdk_8_with_percy:
+    # We've opted this node version to be the one that runs and reports Percy's status
     docker:
-      - image: circleci/openjdk:8-node-browsers
-    steps:
-      - checkout
-      - run: npm install
-      - run: ./run-snapshots.sh
+      - image: circleci/openjdk:10-node-browsers
+    <<: *default_steps
+  openjdk_11:
+    docker:
+      - image: circleci/openjdk:11-node-browsers
+    environment:
+      PERCY_ENABLE: 0
+    <<: *default_steps
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - openjdk_8_with_percy
+      - openjdk_11
