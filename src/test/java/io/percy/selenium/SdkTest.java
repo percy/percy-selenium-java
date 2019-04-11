@@ -78,8 +78,14 @@ public class SdkTest {
   }
 
   @Test
+  public void snapshotsLiveHTTPSite() {
+    driver.get("http://example.com/");
+    percy.snapshot("http://example.com/");
+  }
+
+  @Test
   public void snapshotsLiveHTTPSSite() {
-    driver.get("https://www.google.com");
-    percy.snapshot("Live HTTPS site", Arrays.asList(768, 992, 1200));
+    driver.get("https://sdk-test.percy.dev");
+    percy.snapshot("https://sdk-test.percy.dev");
   }
 }
