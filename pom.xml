@@ -107,7 +107,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.8.0</version>
+        <version>3.8.1</version>
         <configuration>
           <!-- As of Dec 2018, the 'release' flag doesn't work in the CircleCI environment.
                This is likely because of the specific JSDK version used in the CI docker image. Use 'source' and 'target' instead. -->
