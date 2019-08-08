@@ -28,9 +28,7 @@ class Environment {
   String getInfoDict() {
     StringBuilder info = new StringBuilder();
     info.append("{ ");
-    info.append(String.format("clientInfo: '%s'", getClientInfo()));
-    info.append(",");
-    info.append(String.format("environmentInfo: '%s'", getEnvironmentInfo()));
+    info.append(String.format("handleAgentCommunication: false"));
     info.append(" }");
     return info.toString();
   }

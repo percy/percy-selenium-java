@@ -1,5 +1,14 @@
 package io.percy.selenium;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.HttpClientBuilder;
+
+import org.json.JSONObject;
+
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -89,6 +98,32 @@ public class Percy {
         snapshot(name, widths, null);
     }
 
+    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url) {
+        JSONObject json = new JSONObject();
+        json.put("url", url);
+        json.put("name", name);
+        json.put("minHeight", minHeight);
+        json.put("domSnapshot", domSnapshot);
+        // Sending an empty array of widths to agent breaks asset discovery
+        if (widths != null && widths.size() != 0) {
+            json.put("widths", widths);
+        }
+
+        StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
+        HttpClient httpClient = HttpClientBuilder.create().build();
+
+        try {
+            HttpPost request = new HttpPost("http://localhost:5338/percy/snapshot");
+            request.setEntity(entity);
+            // We don't really care about the response -- as long as their test suite doesn't fail
+            HttpResponse response = httpClient.execute(request);
+        } catch (Exception ex) {
+            //handle exception here
+            System.out.println("[percy] Something went wrong sending the DOM to agent: " + ex);
+        }
+
+    }
+
     /**
      * Take a snapshot and upload it to Percy.
      *
@@ -103,29 +138,27 @@ public class Percy {
             LOGGER.log(Level.WARNING, "percy-agent.js is not available. Snapshotting is disabled.");
             return;
         }
+
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(percyAgentJs);
-            jse.executeScript(buildSnapshotJS(name, widths, minHeight));
+            String domSnapshot = (String) jse.executeScript(buildSnapshotJS());
+            postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl());
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
-            LOGGER.log(Level.WARNING, "Something went wrong attempting to take a snapshot: {}", e.getMessage());
+            System.out.println("Something went wrong attempting to take a snapshot: " + e.getMessage());
         }
+
     }
 
     /**
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
-    private String buildSnapshotJS(String name, List<Integer> widths, Integer minHeight) {
+    private String buildSnapshotJS() {
         StringBuilder jsBuilder = new StringBuilder();
-        jsBuilder.append(String.format("const percyAgentClient = new PercyAgent(%s)\n", this.environmentDictString));
-        List<String> snapshotParams = new ArrayList<>(Arrays.asList(String.format("'%s'", name)));
-        String optionalParams = maybeBuildOptionalParamsString(widths, minHeight);
-        if (optionalParams != null) {
-            snapshotParams.add(optionalParams);
-        }
-        jsBuilder.append(String.format("percyAgentClient.snapshot(%s)", String.join(",", snapshotParams)));
+        jsBuilder.append(String.format("var percyAgentClient = new PercyAgent(%s)\n", this.environmentDictString));
+        jsBuilder.append(String.format("return percyAgentClient.snapshot('not used')"));
         return jsBuilder.toString();
     }
 
