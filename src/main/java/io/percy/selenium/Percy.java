@@ -41,6 +41,9 @@ public class Percy {
     // Environment information like Java, browser, & SDK versions
     private Environment env;
 
+    // Is the Percy Agent process running or not
+    private boolean percyIsRunning = true;
+
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
      *               session to snapshot.
@@ -134,13 +137,28 @@ public class Percy {
             domSnapshot = (String) jse.executeScript(buildSnapshotJS());
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
-            System.out.println("Something went wrong attempting to take a snapshot: " + e.getMessage());
+            System.out.println("[percy] Something went wrong attempting to take a snapshot: " + e.getMessage());
         }
 
         postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript);
     }
 
+    /**
+     * POST the DOM taken from the test browser to the Percy Agent node process.
+     *
+     * @param domSnapshot Stringified & serialized version of the site/applications DOM
+     * @param name        The human-readable name of the snapshot. Should be unique.
+     * @param widths      The browser widths at which you want to take the snapshot.
+     *                    In pixels.
+     * @param minHeight   The minimum height of the resulting snapshot. In pixels.
+     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     */
     private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url, boolean enableJavaScript) {
+        if (percyIsRunning == false) {
+            return;
+        }
+
+        // Build a JSON object to POST back to the agent node process
         JSONObject json = new JSONObject();
         json.put("url", url);
         json.put("name", name);
@@ -163,8 +181,9 @@ public class Percy {
             // We don't really care about the response -- as long as their test suite doesn't fail
             HttpResponse response = httpClient.execute(request);
         } catch (Exception ex) {
-            //handle exception here
-            System.out.println("[percy] Something went wrong sending the DOM to agent: " + ex);
+            System.out.println("[percy] An error occured when sending the DOM to agent: " + ex);
+            percyIsRunning = false;
+            System.out.println("[percy] Percy has been disabled");
         }
 
     }
