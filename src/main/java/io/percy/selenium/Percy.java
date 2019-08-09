@@ -38,8 +38,8 @@ public class Percy {
     // The JavaScript contained in percy-agent.js
     private String percyAgentJs;
 
-    // A stringified JavaScript dict containing client and environment information.
-    private String environmentDictString;
+    // Environment information like Java, browser, & SDK versions
+    private Environment env;
 
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
@@ -47,8 +47,8 @@ public class Percy {
      */
     public Percy(WebDriver driver) {
         this.driver = driver;
+        this.env = new Environment(driver);
         this.percyAgentJs = loadPercyAgentJs();
-        this.environmentDictString = new Environment(driver).getInfoDict();
     }
 
     /**
@@ -104,6 +104,7 @@ public class Percy {
      * @param name   The human-readable name of the snapshot. Should be unique.
      * @param widths The browser widths at which you want to take the snapshot. In
      *               pixels.
+     * @param minHeight The minimum height of the resulting snapshot. In pixels.
      */
     public void snapshot(String name, List<Integer> widths, Integer minHeight) {
         snapshot(name, widths, minHeight, false);
@@ -145,7 +146,9 @@ public class Percy {
         json.put("name", name);
         json.put("minHeight", minHeight);
         json.put("domSnapshot", domSnapshot);
+        json.put("clientInfo", env.getClientInfo());
         json.put("enableJavaScript", enableJavaScript);
+        json.put("environmentInfo", env.getEnvironmentInfo());
         // Sending an empty array of widths to agent breaks asset discovery
         if (widths != null && widths.size() != 0) {
             json.put("widths", widths);
@@ -166,13 +169,21 @@ public class Percy {
 
     }
 
+    private String getAgentOptions() {
+        StringBuilder info = new StringBuilder();
+        info.append("{ ");
+        info.append(String.format("handleAgentCommunication: false"));
+        info.append(" }");
+        return info.toString();
+    }
+
     /**
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
     private String buildSnapshotJS() {
         StringBuilder jsBuilder = new StringBuilder();
-        jsBuilder.append(String.format("var percyAgentClient = new PercyAgent(%s)\n", this.environmentDictString));
+        jsBuilder.append(String.format("var percyAgentClient = new PercyAgent(%s)\n", getAgentOptions()));
         jsBuilder.append(String.format("return percyAgentClient.snapshot('not used')"));
 
         return jsBuilder.toString();
