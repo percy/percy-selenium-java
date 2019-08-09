@@ -78,8 +78,20 @@ public class SdkTest {
   }
 
   @Test
-  public void snapshotsLiveHTTPSSite() {
-    driver.get("https://www.google.com");
-    percy.snapshot("Live HTTPS site", Arrays.asList(768, 992, 1200));
+  public void snapshotALiveHTTPSite() {
+    driver.get("http://example.com");
+    percy.snapshot("Site served with HTTP");
+  }
+
+  @Test
+  public void snapshotsWithJavaScriptEnabled() {
+    driver.get("https://example.com");
+    percy.snapshot("Site with JS enabled", null, null, true);
+  }
+
+  @Test
+  public void snapshotsALiveHTTPSSite() {
+    driver.get("https://sdk-test.percy.dev");
+    percy.snapshot("Site with HTTPS, strict CSP, CORS and HSTS setup");
   }
 }

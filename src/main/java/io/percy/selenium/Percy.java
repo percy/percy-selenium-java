@@ -1,5 +1,14 @@
 package io.percy.selenium;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.HttpClientBuilder;
+
+import org.json.JSONObject;
+
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,8 +38,11 @@ public class Percy {
     // The JavaScript contained in percy-agent.js
     private String percyAgentJs;
 
-    // A stringified JavaScript dict containing client and environment information.
-    private String environmentDictString;
+    // Environment information like Java, browser, & SDK versions
+    private Environment env;
+
+    // Is the Percy Agent process running or not
+    private boolean percyIsRunning = true;
 
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
@@ -38,8 +50,8 @@ public class Percy {
      */
     public Percy(WebDriver driver) {
         this.driver = driver;
+        this.env = new Environment(driver);
         this.percyAgentJs = loadPercyAgentJs();
-        this.environmentDictString = new Environment(driver).getInfoDict();
     }
 
     /**
@@ -75,7 +87,7 @@ public class Percy {
      *
      */
     public void snapshot(String name) {
-        snapshot(name, null, null);
+        snapshot(name, null, null, false);
     }
 
     /**
@@ -86,7 +98,19 @@ public class Percy {
      *               pixels.
      */
     public void snapshot(String name, List<Integer> widths) {
-        snapshot(name, widths, null);
+        snapshot(name, widths, null, false);
+    }
+
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name   The human-readable name of the snapshot. Should be unique.
+     * @param widths The browser widths at which you want to take the snapshot. In
+     *               pixels.
+     * @param minHeight The minimum height of the resulting snapshot. In pixels.
+     */
+    public void snapshot(String name, List<Integer> widths, Integer minHeight) {
+        snapshot(name, widths, minHeight, false);
     }
 
     /**
@@ -96,65 +120,91 @@ public class Percy {
      * @param widths    The browser widths at which you want to take the snapshot.
      *                  In pixels.
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
+     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      */
-    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight) {
+    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
+        String domSnapshot = "";
+
         if (percyAgentJs == null) {
             // This would happen if we couldn't load percy-agent.js in the constructor.
             LOGGER.log(Level.WARNING, "percy-agent.js is not available. Snapshotting is disabled.");
             return;
         }
+
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(percyAgentJs);
-            jse.executeScript(buildSnapshotJS(name, widths, minHeight));
+            domSnapshot = (String) jse.executeScript(buildSnapshotJS());
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
-            LOGGER.log(Level.WARNING, "Something went wrong attempting to take a snapshot: {}", e.getMessage());
+            System.out.println("[percy] Something went wrong attempting to take a snapshot: " + e.getMessage());
         }
+
+        postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript);
+    }
+
+    /**
+     * POST the DOM taken from the test browser to the Percy Agent node process.
+     *
+     * @param domSnapshot Stringified & serialized version of the site/applications DOM
+     * @param name        The human-readable name of the snapshot. Should be unique.
+     * @param widths      The browser widths at which you want to take the snapshot.
+     *                    In pixels.
+     * @param minHeight   The minimum height of the resulting snapshot. In pixels.
+     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     */
+    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url, boolean enableJavaScript) {
+        if (percyIsRunning == false) {
+            return;
+        }
+
+        // Build a JSON object to POST back to the agent node process
+        JSONObject json = new JSONObject();
+        json.put("url", url);
+        json.put("name", name);
+        json.put("minHeight", minHeight);
+        json.put("domSnapshot", domSnapshot);
+        json.put("clientInfo", env.getClientInfo());
+        json.put("enableJavaScript", enableJavaScript);
+        json.put("environmentInfo", env.getEnvironmentInfo());
+        // Sending an empty array of widths to agent breaks asset discovery
+        if (widths != null && widths.size() != 0) {
+            json.put("widths", widths);
+        }
+
+        StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
+        HttpClient httpClient = HttpClientBuilder.create().build();
+
+        try {
+            HttpPost request = new HttpPost("http://localhost:5338/percy/snapshot");
+            request.setEntity(entity);
+            // We don't really care about the response -- as long as their test suite doesn't fail
+            HttpResponse response = httpClient.execute(request);
+        } catch (Exception ex) {
+            System.out.println("[percy] An error occured when sending the DOM to agent: " + ex);
+            percyIsRunning = false;
+            System.out.println("[percy] Percy has been disabled");
+        }
+
+    }
+
+    private String getAgentOptions() {
+        StringBuilder info = new StringBuilder();
+        info.append("{ ");
+        info.append(String.format("handleAgentCommunication: false"));
+        info.append(" }");
+        return info.toString();
     }
 
     /**
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
-    private String buildSnapshotJS(String name, List<Integer> widths, Integer minHeight) {
+    private String buildSnapshotJS() {
         StringBuilder jsBuilder = new StringBuilder();
-        jsBuilder.append(String.format("const percyAgentClient = new PercyAgent(%s)\n", this.environmentDictString));
-        List<String> snapshotParams = new ArrayList<>(Arrays.asList(String.format("'%s'", name)));
-        String optionalParams = maybeBuildOptionalParamsString(widths, minHeight);
-        if (optionalParams != null) {
-            snapshotParams.add(optionalParams);
-        }
-        jsBuilder.append(String.format("percyAgentClient.snapshot(%s)", String.join(",", snapshotParams)));
+        jsBuilder.append(String.format("var percyAgentClient = new PercyAgent(%s)\n", getAgentOptions()));
+        jsBuilder.append(String.format("return percyAgentClient.snapshot('not used')"));
+
         return jsBuilder.toString();
-    }
-
-    /**
-     * Converts our optional snapshot parameters into a JavaScript dictionary.
-     *
-     * If we ever add more than these optional parameters, we'll probably want to
-     * add a SnapshotConfig class that can be used to pass in the configuration and
-     * that also knows how to convert itself into a JavaScript dict.
-     *
-     * @return null if there were no optional parameters, the resulting String
-     *         otherwise
-     */
-    @Nullable
-    private String maybeBuildOptionalParamsString(@Nullable List<Integer> widths, @Nullable Integer minHeight) {
-        List<String> stringifiedParams = new ArrayList<String>();
-        if (widths != null) {
-            // Take advantage of the fact that Java stringifies List<Integer> as we need.
-            stringifiedParams.add(String.format("widths: %s", widths));
-        }
-        if (minHeight != null) {
-            stringifiedParams.add(String.format("minHeight: %s", minHeight));
-        }
-
-        if (stringifiedParams.isEmpty()) {
-            // No optional params.
-            return null;
-        }
-
-        return String.format("{ %s }", String.join(",", stringifiedParams));
     }
 }

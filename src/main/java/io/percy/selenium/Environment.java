@@ -25,17 +25,7 @@ class Environment {
     this.driver = driver;
   }
 
-  String getInfoDict() {
-    StringBuilder info = new StringBuilder();
-    info.append("{ ");
-    info.append(String.format("clientInfo: '%s'", getClientInfo()));
-    info.append(",");
-    info.append(String.format("environmentInfo: '%s'", getEnvironmentInfo()));
-    info.append(" }");
-    return info.toString();
-  }
-
-  private String getClientInfo() {
+  public String getClientInfo() {
     String artifactId = DEFAULT_ARTIFACTID;
     String version = UNKNOWN_VERSION;
 
@@ -65,7 +55,7 @@ class Environment {
     return String.format("%s/%s", artifactId, version);
   }
 
-  private String getEnvironmentInfo() {
+  public String getEnvironmentInfo() {
     // If this is a wrapped driver, get the actual driver that this one wraps.
     WebDriver innerDriver = this.driver instanceof WrapsDriver ?
       ((WrapsDriver) this.driver).getWrappedDriver()
