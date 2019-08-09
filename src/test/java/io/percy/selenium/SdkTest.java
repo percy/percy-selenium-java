@@ -82,4 +82,10 @@ public class SdkTest {
     driver.get("https://www.google.com");
     percy.snapshot("Live HTTPS site", Arrays.asList(768, 992, 1200));
   }
+
+  @Test
+  public void snapshotsWithJavaScriptEnabled() {
+    driver.get("https://example.com");
+    percy.snapshot("Site with JS enabled", null, null, true);
+  }
 }

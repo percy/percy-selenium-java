@@ -84,7 +84,7 @@ public class Percy {
      *
      */
     public void snapshot(String name) {
-        snapshot(name, null, null);
+        snapshot(name, null, null, false);
     }
 
     /**
@@ -95,15 +95,57 @@ public class Percy {
      *               pixels.
      */
     public void snapshot(String name, List<Integer> widths) {
-        snapshot(name, widths, null);
+        snapshot(name, widths, null, false);
     }
 
-    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url) {
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name   The human-readable name of the snapshot. Should be unique.
+     * @param widths The browser widths at which you want to take the snapshot. In
+     *               pixels.
+     */
+    public void snapshot(String name, List<Integer> widths, Integer minHeight) {
+        snapshot(name, widths, minHeight, false);
+    }
+
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name      The human-readable name of the snapshot. Should be unique.
+     * @param widths    The browser widths at which you want to take the snapshot.
+     *                  In pixels.
+     * @param minHeight The minimum height of the resulting snapshot. In pixels.
+     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     */
+    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
+        String domSnapshot = "";
+
+        if (percyAgentJs == null) {
+            // This would happen if we couldn't load percy-agent.js in the constructor.
+            LOGGER.log(Level.WARNING, "percy-agent.js is not available. Snapshotting is disabled.");
+            return;
+        }
+
+        try {
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            jse.executeScript(percyAgentJs);
+            domSnapshot = (String) jse.executeScript(buildSnapshotJS());
+        } catch (WebDriverException e) {
+            // For some reason, the execution in the browser failed.
+            System.out.println("Something went wrong attempting to take a snapshot: " + e.getMessage());
+        }
+
+        postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript);
+    }
+
+    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url, boolean enableJavaScript) {
         JSONObject json = new JSONObject();
         json.put("url", url);
         json.put("name", name);
         json.put("minHeight", minHeight);
         json.put("domSnapshot", domSnapshot);
+        json.put("enableJavaScript", enableJavaScript);
         // Sending an empty array of widths to agent breaks asset discovery
         if (widths != null && widths.size() != 0) {
             json.put("widths", widths);
@@ -125,33 +167,6 @@ public class Percy {
     }
 
     /**
-     * Take a snapshot and upload it to Percy.
-     *
-     * @param name      The human-readable name of the snapshot. Should be unique.
-     * @param widths    The browser widths at which you want to take the snapshot.
-     *                  In pixels.
-     * @param minHeight The minimum height of the resulting snapshot. In pixels.
-     */
-    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight) {
-        if (percyAgentJs == null) {
-            // This would happen if we couldn't load percy-agent.js in the constructor.
-            LOGGER.log(Level.WARNING, "percy-agent.js is not available. Snapshotting is disabled.");
-            return;
-        }
-
-        try {
-            JavascriptExecutor jse = (JavascriptExecutor) driver;
-            jse.executeScript(percyAgentJs);
-            String domSnapshot = (String) jse.executeScript(buildSnapshotJS());
-            postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl());
-        } catch (WebDriverException e) {
-            // For some reason, the execution in the browser failed.
-            System.out.println("Something went wrong attempting to take a snapshot: " + e.getMessage());
-        }
-
-    }
-
-    /**
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
@@ -159,35 +174,7 @@ public class Percy {
         StringBuilder jsBuilder = new StringBuilder();
         jsBuilder.append(String.format("var percyAgentClient = new PercyAgent(%s)\n", this.environmentDictString));
         jsBuilder.append(String.format("return percyAgentClient.snapshot('not used')"));
+
         return jsBuilder.toString();
-    }
-
-    /**
-     * Converts our optional snapshot parameters into a JavaScript dictionary.
-     *
-     * If we ever add more than these optional parameters, we'll probably want to
-     * add a SnapshotConfig class that can be used to pass in the configuration and
-     * that also knows how to convert itself into a JavaScript dict.
-     *
-     * @return null if there were no optional parameters, the resulting String
-     *         otherwise
-     */
-    @Nullable
-    private String maybeBuildOptionalParamsString(@Nullable List<Integer> widths, @Nullable Integer minHeight) {
-        List<String> stringifiedParams = new ArrayList<String>();
-        if (widths != null) {
-            // Take advantage of the fact that Java stringifies List<Integer> as we need.
-            stringifiedParams.add(String.format("widths: %s", widths));
-        }
-        if (minHeight != null) {
-            stringifiedParams.add(String.format("minHeight: %s", minHeight));
-        }
-
-        if (stringifiedParams.isEmpty()) {
-            // No optional params.
-            return null;
-        }
-
-        return String.format("{ %s }", String.join(",", stringifiedParams));
     }
 }
