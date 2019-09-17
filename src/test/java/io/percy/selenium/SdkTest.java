@@ -90,6 +90,12 @@ public class SdkTest {
   }
 
   @Test
+  public void snapshotsWithPercyCSS() {
+    driver.get("https://example.com");
+    percy.snapshot("Site with Percy CSS", null, null, false, "body { background-color: purple; }");
+  }
+
+  @Test
   public void snapshotsALiveHTTPSSite() {
     driver.get("https://sdk-test.percy.dev");
     percy.snapshot("Site with HTTPS, strict CSP, CORS and HSTS setup");
