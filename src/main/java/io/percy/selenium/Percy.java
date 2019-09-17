@@ -87,7 +87,7 @@ public class Percy {
      *
      */
     public void snapshot(String name) {
-        snapshot(name, null, null, false);
+        snapshot(name, null, null, false, null);
     }
 
     /**
@@ -98,7 +98,7 @@ public class Percy {
      *               pixels.
      */
     public void snapshot(String name, List<Integer> widths) {
-        snapshot(name, widths, null, false);
+        snapshot(name, widths, null, false, null);
     }
 
     /**
@@ -110,7 +110,20 @@ public class Percy {
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      */
     public void snapshot(String name, List<Integer> widths, Integer minHeight) {
-        snapshot(name, widths, minHeight, false);
+        snapshot(name, widths, minHeight, false, null);
+    }
+
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name   The human-readable name of the snapshot. Should be unique.
+     * @param widths The browser widths at which you want to take the snapshot. In
+     *               pixels.
+     * @param minHeight The minimum height of the resulting snapshot. In pixels.
+     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     */
+    public void snapshot(String name, List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
+        snapshot(name, widths, minHeight, false, null);
     }
 
     /**
@@ -121,8 +134,9 @@ public class Percy {
      *                  In pixels.
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
-    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
+    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS) {
         String domSnapshot = "";
 
         if (percyAgentJs == null) {
@@ -140,7 +154,7 @@ public class Percy {
             System.out.println("[percy] Something went wrong attempting to take a snapshot: " + e.getMessage());
         }
 
-        postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript);
+        postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript, percyCSS);
     }
 
     /**
@@ -152,8 +166,9 @@ public class Percy {
      *                    In pixels.
      * @param minHeight   The minimum height of the resulting snapshot. In pixels.
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
-    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url, boolean enableJavaScript) {
+    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url, boolean enableJavaScript, String percyCSS) {
         if (percyIsRunning == false) {
             return;
         }
@@ -162,6 +177,7 @@ public class Percy {
         JSONObject json = new JSONObject();
         json.put("url", url);
         json.put("name", name);
+        json.put("percyCSS", percyCSS);
         json.put("minHeight", minHeight);
         json.put("domSnapshot", domSnapshot);
         json.put("clientInfo", env.getClientInfo());
