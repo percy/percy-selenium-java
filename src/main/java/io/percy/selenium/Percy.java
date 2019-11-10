@@ -74,7 +74,7 @@ public class Percy {
             stream.read(agentBytes);
             return new String(agentBytes);
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Something went wrong trying to load {}. Snapshotting will not work.",
+            LOGGER.log(Level.WARNING, "Something went wrong trying to load {0}. Snapshotting will not work.",
                     AGENTJS_FILE);
             return null;
         }
