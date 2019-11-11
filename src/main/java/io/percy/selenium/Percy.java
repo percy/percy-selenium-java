@@ -3,11 +3,11 @@ package io.percy.selenium;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.util.EntityUtils;
-import org.apache.http.client.HttpClient;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 
 import org.json.JSONObject;
@@ -65,9 +65,7 @@ public class Percy {
      */
     @Nullable
     private String loadPercyAgentJs() {
-        HttpClient httpClient = HttpClientBuilder.create().build();
-
-        try {
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
             //Creating a HttpGet object
             HttpGet httpget = new HttpGet("http://localhost:5338/percy-agent.js");
 
@@ -199,9 +197,8 @@ public class Percy {
         }
 
         StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
-        HttpClient httpClient = HttpClientBuilder.create().build();
 
-        try {
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
             HttpPost request = new HttpPost("http://localhost:5338/percy/snapshot");
             request.setEntity(entity);
             // We don't really care about the response -- as long as their test suite doesn't fail
