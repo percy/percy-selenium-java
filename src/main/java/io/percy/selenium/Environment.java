@@ -32,8 +32,8 @@ class Environment {
     // Try to read the artifactId and version from the Jar's properties file.
     InputStream propsStream = getClass().getClassLoader().getResourceAsStream(PROPS_PATH);
     if (propsStream != null) {
-      BufferedReader reader = new BufferedReader(new InputStreamReader(propsStream));
-      try {
+      try (InputStreamReader streamReader = new InputStreamReader(propsStream);
+          BufferedReader reader = new BufferedReader(streamReader)) {
         while (reader.ready()) {
           String line = reader.readLine();
           String[] lineParts = line.split("=");
