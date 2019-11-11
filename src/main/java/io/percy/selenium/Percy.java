@@ -1,9 +1,12 @@
 package io.percy.selenium;
 
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
+import org.apache.http.util.EntityUtils;
 import org.apache.http.client.HttpClient;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.HttpClientBuilder;
 
@@ -55,27 +58,35 @@ public class Percy {
     }
 
     /**
-     * Attempts to load percy-agent.js from the resources in this Jar. The file
-     * comes from the node module @percy/agent, which is installed and packaged into
-     * this Jar as part of the Maven build.
+     * Attempts to load percy-agent.js from `http://localhost:5338/percy-agent.js`.
      *
-     * Bundling the percy-agent.js file with this library does run the minor risk of
-     * a future incompatibility between the bundled percy-agent.js in this library,
-     * and the version of @percy/agent being run by the library's client.
-     *
-     * An alternative to consider would be to try to load percy-agent.js at runtime
-     * from a running percy agent server on the standard port.
+     * This JavaScript is critical for capturing snapshots. It serializes and captures
+     * the DOM. Without it, snapshots cannot be captured.
      */
     @Nullable
     private String loadPercyAgentJs() {
+        HttpClient httpClient = HttpClientBuilder.create().build();
+
         try {
-            InputStream stream = getClass().getClassLoader().getResourceAsStream(AGENTJS_FILE);
-            byte[] agentBytes = new byte[stream.available()];
-            stream.read(agentBytes);
-            return new String(agentBytes);
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Something went wrong trying to load {}. Snapshotting will not work.",
-                    AGENTJS_FILE);
+            //Creating a HttpGet object
+            HttpGet httpget = new HttpGet("http://localhost:5338/percy-agent.js");
+
+            //Executing the Get request
+            HttpResponse response = httpClient.execute(httpget);
+
+            int statusCode = response.getStatusLine().getStatusCode();
+            if (statusCode != 200){
+                throw new RuntimeException("Failed with HTTP error code : " + statusCode);
+            }
+
+            HttpEntity httpEntity = response.getEntity();
+            String agentJSString = EntityUtils.toString(httpEntity);
+
+            return agentJSString;
+        } catch (Exception ex) {
+            System.out.println("[percy] An error occured while retrieving percy-agent.js: " + ex);
+            percyIsRunning = false;
+            System.out.println("[percy] Percy has been disabled");
             return null;
         }
     }
@@ -141,7 +152,6 @@ public class Percy {
 
         if (percyAgentJs == null) {
             // This would happen if we couldn't load percy-agent.js in the constructor.
-            LOGGER.log(Level.WARNING, "percy-agent.js is not available. Snapshotting is disabled.");
             return;
         }
 
