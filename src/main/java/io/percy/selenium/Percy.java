@@ -132,7 +132,7 @@ public class Percy {
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      */
     public void snapshot(String name, List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
-        snapshot(name, widths, minHeight, false, null);
+        snapshot(name, widths, minHeight, enableJavaScript, null);
     }
 
     /**
