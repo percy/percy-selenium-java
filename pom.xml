@@ -46,6 +46,7 @@
       <groupId>org.seleniumhq.selenium</groupId>
       <artifactId>selenium-java</artifactId>
       <version>3.141.59</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.json</groupId>
