@@ -1,15 +1,14 @@
 package io.percy.selenium;
 
+import org.openqa.selenium.Capabilities;
+import org.openqa.selenium.HasCapabilities;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WrapsDriver;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-
-import org.openqa.selenium.Capabilities;
-import org.openqa.selenium.HasCapabilities;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.internal.WrapsDriver;
-import org.openqa.selenium.remote.RemoteWebDriver;
 
 /**
  * Package-private class to compute Environment information.
