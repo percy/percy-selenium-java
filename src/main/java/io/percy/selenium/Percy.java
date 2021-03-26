@@ -1,5 +1,6 @@
 package io.percy.selenium;
 
+import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.util.EntityUtils;
@@ -29,23 +30,26 @@ import org.openqa.selenium.WebDriverException;
  * Percy client for visual testing.
  */
 public class Percy {
-
-    private static final Logger LOGGER = Logger.getLogger(Percy.class.getName());
-
-    // We'll expect this file to exist at the root of our classpath, as a resource.
-    private static final String AGENTJS_FILE = "percy-agent.js";
-
     // Selenium WebDriver we'll use for accessing the web pages to snapshot.
     private WebDriver driver;
 
-    // The JavaScript contained in percy-agent.js
-    private String percyAgentJs;
+    // The JavaScript contained in dom.js
+    private String domJs = "";
+
+    // Maybe get the CLI server address
+    private String PERCY_SERVER_ADDRESS = System.getenv().getOrDefault("PERCY_SERVER_ADDRESS", "http://localhost:5338");
+
+    // Determine if we're debug logging
+    private boolean PERCY_DEBUG = System.getenv("PERCY_LOGLEVEL").equals("debug");
+
+    // for logging
+    private String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
+
+    // Is the Percy server running or not
+    private boolean isPercyEnabled = healthcheck();
 
     // Environment information like Java, browser, & SDK versions
     private Environment env;
-
-    // Is the Percy Agent process running or not
-    private boolean percyIsRunning = true;
 
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
@@ -54,39 +58,6 @@ public class Percy {
     public Percy(WebDriver driver) {
         this.driver = driver;
         this.env = new Environment(driver);
-        this.percyAgentJs = loadPercyAgentJs();
-    }
-
-    /**
-     * Attempts to load percy-agent.js from `http://localhost:5338/percy-agent.js`.
-     *
-     * This JavaScript is critical for capturing snapshots. It serializes and captures
-     * the DOM. Without it, snapshots cannot be captured.
-     */
-    @Nullable
-    private String loadPercyAgentJs() {
-        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
-            //Creating a HttpGet object
-            HttpGet httpget = new HttpGet("http://localhost:5338/percy-agent.js");
-
-            //Executing the Get request
-            HttpResponse response = httpClient.execute(httpget);
-
-            int statusCode = response.getStatusLine().getStatusCode();
-            if (statusCode != 200){
-                throw new RuntimeException("Failed with HTTP error code : " + statusCode);
-            }
-
-            HttpEntity httpEntity = response.getEntity();
-            String agentJSString = EntityUtils.toString(httpEntity);
-
-            return agentJSString;
-        } catch (Exception ex) {
-            System.out.println("[percy] An error occured while retrieving percy-agent.js: " + ex);
-            percyIsRunning = false;
-            System.out.println("[percy] Percy has been disabled");
-            return null;
-        }
     }
 
     /**
@@ -146,23 +117,95 @@ public class Percy {
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
     public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS) {
-        String domSnapshot = "";
+        if (!isPercyEnabled) { return; }
 
-        if (percyAgentJs == null) {
-            // This would happen if we couldn't load percy-agent.js in the constructor.
-            return;
-        }
+        String domSnapshot = "";
 
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
-            jse.executeScript(percyAgentJs);
-            domSnapshot = (String) jse.executeScript(buildSnapshotJS());
+            jse.executeScript(fetchPercyDOM());
+            domSnapshot = (String) jse.executeScript(buildSnapshotJS(Boolean.toString(enableJavaScript)));
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
-            System.out.println("[percy] Something went wrong attempting to take a snapshot: " + e.getMessage());
+            if (PERCY_DEBUG) { log(e.getMessage()); }
         }
 
         postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript, percyCSS);
+    }
+
+    /**
+     * Checks to make sure the local Percy server is running. If not, disable Percy.
+     */
+    private boolean healthcheck() {
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            //Creating a HttpGet object
+            HttpGet httpget = new HttpGet(PERCY_SERVER_ADDRESS + "/percy/healthcheck");
+
+            //Executing the Get request
+            HttpResponse response = httpClient.execute(httpget);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200){
+                throw new RuntimeException("Failed with HTTP error code : " + statusCode);
+            }
+
+            String version = response.getFirstHeader("x-percy-core-version").getValue();
+
+            if (version == null) {
+                log("You may be using @percy/agent" +
+                    "which is no longer supported by this SDK." +
+                    "Please uninstall @percy/agent and install @percy/cli instead." +
+                    "https://docs.percy.io/docs/migrating-to-percy-cli"
+                    );
+
+                return false;
+            }
+
+            if (!version.split("\\.")[0].equals("1")) {
+                log("Unsupported Percy CLI version, " + version);
+
+                return false;
+            }
+
+            return true;
+        } catch (Exception ex) {
+            log("Percy is not running, disabling snapshots");
+            // bike shed.. single line?
+            if (PERCY_DEBUG) { log(ex.toString()); }
+
+            return false;
+        }
+    }
+
+    /**
+     * Attempts to load dom.js from the local Percy server. Use cached value in `domJs`,
+     * if it exists.
+     *
+     * This JavaScript is critical for capturing snapshots. It serializes and captures
+     * the DOM. Without it, snapshots cannot be captured.
+     */
+    private String fetchPercyDOM() {
+        if (!domJs.trim().isEmpty()) { return domJs; }
+
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            HttpGet httpget = new HttpGet(PERCY_SERVER_ADDRESS + "/percy/dom.js");
+            HttpResponse response = httpClient.execute(httpget);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200){
+                throw new RuntimeException("Failed with HTTP error code: " + statusCode);
+            }
+            HttpEntity httpEntity = response.getEntity();
+            String domString = EntityUtils.toString(httpEntity);
+            domJs = domString;
+
+            return domString;
+        } catch (Exception ex) {
+            isPercyEnabled = false;
+            if (PERCY_DEBUG) { log(ex.toString()); }
+
+            return "";
+        }
     }
 
     /**
@@ -176,10 +219,16 @@ public class Percy {
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
-    private void postSnapshot(String domSnapshot, String name, @Nullable List<Integer> widths, Integer minHeight, String url, boolean enableJavaScript, String percyCSS) {
-        if (percyIsRunning == false) {
-            return;
-        }
+    private void postSnapshot(
+      String domSnapshot,
+      String name,
+      @Nullable List<Integer> widths,
+      Integer minHeight,
+      String url,
+      boolean enableJavaScript,
+      String percyCSS
+    ) {
+        if (!isPercyEnabled) { return; }
 
         // Build a JSON object to POST back to the agent node process
         JSONObject json = new JSONObject();
@@ -191,43 +240,33 @@ public class Percy {
         json.put("clientInfo", env.getClientInfo());
         json.put("enableJavaScript", enableJavaScript);
         json.put("environmentInfo", env.getEnvironmentInfo());
-        // Sending an empty array of widths to agent breaks asset discovery
-        if (widths != null && widths.size() != 0) {
-            json.put("widths", widths);
-        }
+        json.put("widths", widths);
 
         StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
 
         try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
-            HttpPost request = new HttpPost("http://localhost:5338/percy/snapshot");
+            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/snapshot");
             request.setEntity(entity);
-            // We don't really care about the response -- as long as their test suite doesn't fail
             HttpResponse response = httpClient.execute(request);
         } catch (Exception ex) {
-            System.out.println("[percy] An error occured when sending the DOM to agent: " + ex);
-            percyIsRunning = false;
-            System.out.println("[percy] Percy has been disabled");
+            if (PERCY_DEBUG) { log(ex.toString()); }
+            log("Could not post snapshot " + name);
         }
 
-    }
-
-    private String getAgentOptions() {
-        StringBuilder info = new StringBuilder();
-        info.append("{ ");
-        info.append(String.format("handleAgentCommunication: false"));
-        info.append(" }");
-        return info.toString();
     }
 
     /**
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
-    private String buildSnapshotJS() {
+    private String buildSnapshotJS(String enableJavaScript) {
         StringBuilder jsBuilder = new StringBuilder();
-        jsBuilder.append(String.format("var percyAgentClient = new PercyAgent(%s)\n", getAgentOptions()));
-        jsBuilder.append(String.format("return percyAgentClient.snapshot('not used')"));
+        jsBuilder.append(String.format("return PercyDOM.serialize({ enableJavaScript: %s })\n", enableJavaScript));
 
         return jsBuilder.toString();
+    }
+
+    private void log(String message) {
+        System.out.println(LABEL + " " + message);
     }
 }
