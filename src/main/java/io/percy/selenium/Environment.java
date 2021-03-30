@@ -9,19 +9,16 @@ import org.openqa.selenium.WrapsDriver;
  * Package-private class to compute Environment information.
  */
 class Environment {
-  private final static String DEFAULT_ARTIFACTID = "percy-java-selenium";
-  private final static String UNKNOWN_VERSION = "1.0.0";
   private WebDriver driver;
+  private final static String SDK_VERSION = "1.0.0";
+  private final static String SDK_NAME = "percy-java-selenium";
 
   Environment(WebDriver driver) {
     this.driver = driver;
   }
 
   public String getClientInfo() {
-    String artifactId = DEFAULT_ARTIFACTID;
-    String version = UNKNOWN_VERSION;
-
-    return String.format("%s/%s", artifactId, version);
+    return SDK_NAME + "/" + SDK_VERSION;
   }
 
   public String getEnvironmentInfo() {
