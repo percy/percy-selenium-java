@@ -19,8 +19,8 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
-          key: v1/${{ runner.os }}/node-${{ matrix.node }}/${{ hashFiles('**/yarn.lock') }}
-          restore-keys: v1/${{ runner.os }}/node-${{ matrix.node }}/
+          key: v1/${{ runner.os }}/java-${{ matrix.java }}/${{ hashFiles('**/yarn.lock') }}
+          restore-keys: v1/${{ runner.os }}/java-${{ matrix.java }}/
       - run: yarn
       - run: npx percy exec -- mvn test
         env:
