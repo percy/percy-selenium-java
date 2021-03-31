@@ -1,0 +1,27 @@
+name: Test
+on: push
+jobs:
+  test:
+    name: Test
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        java: [8, 8.0.192, 9.0.x, 10, 11.0.x, 11.0.3, 12, 13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-java@v1
+        with:
+          java-version: ${{ matrix.java }}
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - uses: actions/cache@v2
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: v1/${{ runner.os }}/java-${{ matrix.java }}/${{ hashFiles('**/yarn.lock') }}
+          restore-keys: v1/${{ runner.os }}/java-${{ matrix.java }}/
+      - run: yarn
+      - run: npx percy exec -- mvn test
+        env:
+          PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}

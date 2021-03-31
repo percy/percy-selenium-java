@@ -12,8 +12,9 @@ import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.firefox.FirefoxDriver;
+import org.openqa.selenium.firefox.FirefoxOptions;
+
 
 public class SdkTest {
   private static final String TEST_URL = "http://localhost:8000";
@@ -21,29 +22,23 @@ public class SdkTest {
   private static Percy percy;
 
   @BeforeAll
-  public static void openServerAndBrowser() throws IOException {
+  public static void testSetup() throws IOException {
+    // Disable browser logs from being logged to stdout
+    System.setProperty(FirefoxDriver.SystemProperty.BROWSER_LOGFILE,"/dev/null");
+
     TestServer.startServer();
-    ChromeOptions options = new ChromeOptions();
-    options.addArguments(
-      "--headless",
-      "--disable-web-security",
-      "--allow-running-insecure-content",
-      "--ignore-certificate-errors");
-    driver = new ChromeDriver(options);
+    FirefoxOptions options = new FirefoxOptions();
+    options.setHeadless(true);
+    driver = new FirefoxDriver(options);
     percy = new Percy(driver);
   }
 
   @AfterAll
-  public static void closeServerAndBrowser() {
+  public static void testTeardown() {
     // Close our test browser.
     driver.quit();
     // Shutdown our server and make sure the threadpool also terminates.
     TestServer.shutdown();
-  }
-
-  @AfterEach
-  public void clearLocalStorage() {
-    ((JavascriptExecutor) driver).executeScript("window.localStorage.clear()");
   }
 
   @Test
