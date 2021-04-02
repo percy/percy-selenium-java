@@ -133,6 +133,7 @@
         <version>1.6</version>
         <configuration>
           <useAgent>true</useAgent>
+          <skip>true</skip>
         </configuration>
         <executions>
           <execution>

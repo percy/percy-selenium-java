@@ -40,7 +40,7 @@ public class Percy {
     private String PERCY_SERVER_ADDRESS = System.getenv().getOrDefault("PERCY_SERVER_ADDRESS", "http://localhost:5338");
 
     // Determine if we're debug logging
-    private boolean PERCY_DEBUG = System.getenv("PERCY_LOGLEVEL").equals("debug");
+    private boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
 
     // for logging
     private String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
