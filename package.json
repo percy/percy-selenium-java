@@ -1,6 +1,6 @@
 {
   "private": true,
   "devDependencies": {
-    "@percy/cli": "^1.8.0"
+    "@percy/cli": "^1.9.0"
   }
 }
