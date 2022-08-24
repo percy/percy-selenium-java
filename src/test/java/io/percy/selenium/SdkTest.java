@@ -27,9 +27,7 @@ public class SdkTest {
     System.setProperty(FirefoxDriver.SystemProperty.BROWSER_LOGFILE,"/dev/null");
 
     TestServer.startServer();
-    FirefoxOptions options = new FirefoxOptions();
-    options.setHeadless(true);
-    driver = new FirefoxDriver(options);
+    driver = new FirefoxDriver();
     percy = new Percy(driver);
   }
 
