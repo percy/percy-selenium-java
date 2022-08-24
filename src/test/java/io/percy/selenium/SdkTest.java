@@ -91,8 +91,8 @@ public class SdkTest {
   }
 
   @Test
-  public void snapshotsALiveHTTPSSite() {
-    driver.get("https://sdk-test.percy.dev");
-    percy.snapshot("Site with HTTPS, strict CSP, CORS and HSTS setup");
+  public void snapshotsWithScope() {
+    driver.get("https://example.com");
+    percy.snapshot("Site with scope", null, null, false, "", "div");
   }
 }
