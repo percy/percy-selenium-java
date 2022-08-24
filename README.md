@@ -74,14 +74,16 @@ $ percy exec -- [java test command]
 
 The snapshot method arguments:
 
-`percy.snapshot(name, widths[], minHeight, enableJavaScript, percyCSS)`
+`percy.snapshot(name, widths[], minHeight, enableJavaScript, percyCSS, scope)`
 
 - `name` (**required**) - The snapshot name; must be unique to each snapshot
 - Additional snapshot options (overrides any project options):
   - `widths` - An array of widths to take screenshots at
   - `minHeight` - The minimum viewport height to take screenshots at
   - `enableJavaScript` - Enable JavaScript in Percy's rendering environment
-  - `percyCSS` - Percy specific CSS only applied in Percy's rendering environment
+  - `percyCSS` - Percy specific CSS only applied in Percy's rendering
+    environment
+  - `scope` - A CSS selector to scope the screenshot to
 
 
 ## Upgrading

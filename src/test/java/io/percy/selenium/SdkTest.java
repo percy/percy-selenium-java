@@ -27,9 +27,7 @@ public class SdkTest {
     System.setProperty(FirefoxDriver.SystemProperty.BROWSER_LOGFILE,"/dev/null");
 
     TestServer.startServer();
-    FirefoxOptions options = new FirefoxOptions();
-    options.setHeadless(true);
-    driver = new FirefoxDriver(options);
+    driver = new FirefoxDriver();
     percy = new Percy(driver);
   }
 
@@ -91,8 +89,8 @@ public class SdkTest {
   }
 
   @Test
-  public void snapshotsALiveHTTPSSite() {
-    driver.get("https://sdk-test.percy.dev");
-    percy.snapshot("Site with HTTPS, strict CSP, CORS and HSTS setup");
+  public void snapshotsWithScope() {
+    driver.get("https://example.com");
+    percy.snapshot("Site with scope", null, null, false, "", "div");
   }
 }
