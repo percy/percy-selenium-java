@@ -141,5 +141,5 @@ $ brew install mvn
 Run tests:
 
 ```
-npx percy exec -- mvn test
+npm test
 ```
