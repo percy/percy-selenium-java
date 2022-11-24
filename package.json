@@ -1,6 +1,9 @@
 {
   "private": true,
+  "scripts":  {
+    "test": "npx percy exec --testing -- mvn test"
+  },
   "devDependencies": {
-    "@percy/cli": "^1.12.0"
+    "@percy/cli": "^1.16.0"
   }
 }
