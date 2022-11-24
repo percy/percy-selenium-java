@@ -17,6 +17,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -134,12 +135,12 @@ public class Percy {
     public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope) {
         if (!isPercyEnabled) { return; }
 
-        String domSnapshot = "";
+        Map<String, Object> domSnapshot = null;
 
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(fetchPercyDOM());
-            domSnapshot = (String) jse.executeScript(buildSnapshotJS(Boolean.toString(enableJavaScript)));
+            domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(Boolean.toString(enableJavaScript)));
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
             if (PERCY_DEBUG) { log(e.getMessage()); }
@@ -235,7 +236,7 @@ public class Percy {
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
     private void postSnapshot(
-      String domSnapshot,
+      Map<String, Object> domSnapshot,
       String name,
       @Nullable List<Integer> widths,
       Integer minHeight,
