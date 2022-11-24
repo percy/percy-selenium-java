@@ -124,3 +124,22 @@ If you have a previous Percy configuration file, migrate it to the newest versio
 ```sh-session
 $ percy config:migrate
 ```
+## Development
+
+Install/update `@percy/cli` dev dependency (requires Node 14+):
+
+```sh-session
+$ npm install --save-dev @percy/cli
+```
+
+Install maven:
+
+```sh-session
+$ brew install mvn
+```
+
+Run tests:
+
+```
+npx percy exec -- mvn test
+```
