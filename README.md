@@ -19,7 +19,7 @@ Add percy-java-selenium to your project dependencies. If you're using Maven:
 <dependency>
   <groupId>io.percy</groupId>
   <artifactId>percy-java-selenium</artifactId>
-  <version>1.0.0</version>
+  <version>1.2.0</version>
 </dependency>
 ```
 
