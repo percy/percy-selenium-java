@@ -32,7 +32,7 @@
     <connection>scm:git:git://github.com/percy/percy-java-selenium.git</connection>
     <developerConnection>scm:git:https://github.com/percy/percy-java-selenium.git</developerConnection>
     <url>https://github.com/percy/percy-java-selenium/tree/master</url>
-    <tag>percy-java-selenium-1.2.0</tag>
+    <tag>v1.2.0</tag>
   </scm>
 
   <properties>
