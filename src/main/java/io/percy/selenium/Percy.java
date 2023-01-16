@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -136,17 +137,31 @@ public class Percy {
         if (!isPercyEnabled) { return; }
 
         Map<String, Object> domSnapshot = null;
+        Map<String, Object> options = new HashMap<String, Object>();
+        options.put("widths", widths);
+        options.put("minHeight", minHeight);
+        options.put("enableJavaScript", enableJavaScript);
+        options.put("percyCSS", percyCSS);
+        options.put("scope", scope);
+
+        snapshot(name, options);
+    }
+
+    public void snapshot(String name, Map<String, Object> options) {
+        if (!isPercyEnabled) { return; }
+
+        Map<String, Object> domSnapshot = null;
 
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(fetchPercyDOM());
-            domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(Boolean.toString(enableJavaScript)));
+            domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
             if (PERCY_DEBUG) { log(e.getMessage()); }
         }
 
-        postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript, percyCSS, scope);
+        postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
     }
 
     /**
@@ -274,12 +289,53 @@ public class Percy {
     }
 
     /**
+     * POST the DOM taken from the test browser to the Percy Agent node process.
+     *
+     * @param domSnapshot Stringified & serialized version of the site/applications DOM
+     * @param name        The human-readable name of the snapshot. Should be unique.
+     * @param widths      The browser widths at which you want to take the snapshot.
+     *                    In pixels.
+     * @param minHeight   The minimum height of the resulting snapshot. In pixels.
+     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
+     * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
+     */
+    private void postSnapshot(
+      Map<String, Object> domSnapshot,
+      String name,
+      String url,
+      Map<String, Object> options
+    ) {
+        if (!isPercyEnabled) { return; }
+
+        // Build a JSON object to POST back to the agent node process
+        JSONObject json = new JSONObject(options);
+        json.put("url", url);
+        json.put("name", name);
+        json.put("domSnapshot", domSnapshot);
+        json.put("clientInfo", env.getClientInfo());
+        json.put("environmentInfo", env.getEnvironmentInfo());
+
+        StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
+
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/snapshot");
+            request.setEntity(entity);
+            HttpResponse response = httpClient.execute(request);
+        } catch (Exception ex) {
+            if (PERCY_DEBUG) { log(ex.toString()); }
+            log("Could not post snapshot " + name);
+        }
+
+    }
+
+    /**
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
-    private String buildSnapshotJS(String enableJavaScript) {
+    private String buildSnapshotJS(Map<String, Object> options) {
         StringBuilder jsBuilder = new StringBuilder();
-        jsBuilder.append(String.format("return PercyDOM.serialize({ enableJavaScript: %s })\n", enableJavaScript));
+        JSONObject json = new JSONObject(options);
+        jsBuilder.append(String.format("return PercyDOM.serialize(%s)\n", json.toString()));
 
         return jsBuilder.toString();
     }

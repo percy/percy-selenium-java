@@ -2,6 +2,8 @@ package io.percy.selenium;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -92,5 +94,15 @@ public class SdkTest {
   public void snapshotsWithScope() {
     driver.get("https://example.com");
     percy.snapshot("Site with scope", null, null, false, "", "div");
+  }
+
+  @Test
+  public void snapshotWithOptions() {
+    driver.get("https://example.com");
+    Map<String, Object> options = new HashMap<String, Object>();
+    options.put("percyCSS", "body { background-color: purple }");
+    options.put("scope", "div");
+    options.put("widths", Arrays.asList(768, 992, 1200));
+    percy.snapshot("Site with options", options);
   }
 }
