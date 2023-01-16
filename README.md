@@ -5,6 +5,26 @@
 
 [Percy](https://percy.io) visual testing for Java Selenium.
 
+## Development
+
+Install/update `@percy/cli` dev dependency (requires Node 14+):
+
+```sh-session
+$ npm install --save-dev @percy/cli
+```
+
+Install maven:
+
+```sh-session
+$ brew install mvn
+```
+
+Run tests:
+
+```
+npm test
+```
+
 ## Installation
 
 npm install `@percy/cli`:
@@ -19,7 +39,7 @@ Add percy-java-selenium to your project dependencies. If you're using Maven:
 <dependency>
   <groupId>io.percy</groupId>
   <artifactId>percy-java-selenium</artifactId>
-  <version>1.0.0</version>
+  <version>1.2.0</version>
 </dependency>
 ```
 
@@ -123,23 +143,4 @@ If you have a previous Percy configuration file, migrate it to the newest versio
 
 ```sh-session
 $ percy config:migrate
-```
-## Development
-
-Install/update `@percy/cli` dev dependency (requires Node 14+):
-
-```sh-session
-$ npm install --save-dev @percy/cli
-```
-
-Install maven:
-
-```sh-session
-$ brew install mvn
-```
-
-Run tests:
-
-```
-npm test
 ```
