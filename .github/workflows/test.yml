@@ -5,7 +5,7 @@ jobs:
     name: Test
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-20.04]
         java: [8, 8.0.192, 9.0.x, 10, 11.0.x, 11.0.3, 12, 13]
     runs-on: ${{ matrix.os }}
     steps:
@@ -22,7 +22,7 @@ jobs:
           key: v1/${{ runner.os }}/java-${{ matrix.java }}/${{ hashFiles('**/yarn.lock') }}
           restore-keys: v1/${{ runner.os }}/java-${{ matrix.java }}/
       - run: yarn
-      - run: sudo apt-get install firefox
+      - run: sudo apt-get install firefox-geckodriver
       - run: MOZ_HEADLESS=1 npx percy exec -- mvn test
         env:
           PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
