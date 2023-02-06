@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -136,17 +137,31 @@ public class Percy {
         if (!isPercyEnabled) { return; }
 
         Map<String, Object> domSnapshot = null;
+        Map<String, Object> options = new HashMap<String, Object>();
+        options.put("widths", widths);
+        options.put("minHeight", minHeight);
+        options.put("enableJavaScript", enableJavaScript);
+        options.put("percyCSS", percyCSS);
+        options.put("scope", scope);
+
+        snapshot(name, options);
+    }
+
+    public void snapshot(String name, Map<String, Object> options) {
+        if (!isPercyEnabled) { return; }
+
+        Map<String, Object> domSnapshot = null;
 
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(fetchPercyDOM());
-            domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(Boolean.toString(enableJavaScript)));
+            domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
             if (PERCY_DEBUG) { log(e.getMessage()); }
         }
 
-        postSnapshot(domSnapshot, name, widths, minHeight, driver.getCurrentUrl(), enableJavaScript, percyCSS, scope);
+        postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
     }
 
     /**
@@ -238,27 +253,18 @@ public class Percy {
     private void postSnapshot(
       Map<String, Object> domSnapshot,
       String name,
-      @Nullable List<Integer> widths,
-      Integer minHeight,
       String url,
-      boolean enableJavaScript,
-      String percyCSS,
-      String scope
+      Map<String, Object> options
     ) {
         if (!isPercyEnabled) { return; }
 
         // Build a JSON object to POST back to the agent node process
-        JSONObject json = new JSONObject();
+        JSONObject json = new JSONObject(options);
         json.put("url", url);
         json.put("name", name);
-        json.put("scope", scope);
-        json.put("percyCSS", percyCSS);
-        json.put("minHeight", minHeight);
         json.put("domSnapshot", domSnapshot);
         json.put("clientInfo", env.getClientInfo());
-        json.put("enableJavaScript", enableJavaScript);
         json.put("environmentInfo", env.getEnvironmentInfo());
-        json.put("widths", widths);
 
         StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
 
@@ -277,9 +283,10 @@ public class Percy {
      * @return A String containing the JavaScript needed to instantiate a PercyAgent
      *         and take a snapshot.
      */
-    private String buildSnapshotJS(String enableJavaScript) {
+    private String buildSnapshotJS(Map<String, Object> options) {
         StringBuilder jsBuilder = new StringBuilder();
-        jsBuilder.append(String.format("return PercyDOM.serialize({ enableJavaScript: %s })\n", enableJavaScript));
+        JSONObject json = new JSONObject(options);
+        jsBuilder.append(String.format("return PercyDOM.serialize(%s)\n", json.toString()));
 
         return jsBuilder.toString();
     }
