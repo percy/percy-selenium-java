@@ -103,6 +103,8 @@ public class SdkTest {
     driver.get("https://example.com");
     Map<String, Object> options = new HashMap<String, Object>();
     options.put("percyCSS", "body { background-color: purple }");
+    // `domTransformation` currently doesn't work since CLI package needs to eval this function first
+    // few javascript based Percy SDKs work since they run directly in browser
     options.put("domTransformation", "(documentElement) => documentElement.querySelector('body').style.color = 'green';");
     options.put("scope", "div");
     options.put("widths", Arrays.asList(768, 992, 1200));
