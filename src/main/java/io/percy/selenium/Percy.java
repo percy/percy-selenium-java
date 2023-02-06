@@ -253,55 +253,6 @@ public class Percy {
     private void postSnapshot(
       Map<String, Object> domSnapshot,
       String name,
-      @Nullable List<Integer> widths,
-      Integer minHeight,
-      String url,
-      boolean enableJavaScript,
-      String percyCSS,
-      String scope
-    ) {
-        if (!isPercyEnabled) { return; }
-
-        // Build a JSON object to POST back to the agent node process
-        JSONObject json = new JSONObject();
-        json.put("url", url);
-        json.put("name", name);
-        json.put("scope", scope);
-        json.put("percyCSS", percyCSS);
-        json.put("minHeight", minHeight);
-        json.put("domSnapshot", domSnapshot);
-        json.put("clientInfo", env.getClientInfo());
-        json.put("enableJavaScript", enableJavaScript);
-        json.put("environmentInfo", env.getEnvironmentInfo());
-        json.put("widths", widths);
-
-        StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
-
-        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
-            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/snapshot");
-            request.setEntity(entity);
-            HttpResponse response = httpClient.execute(request);
-        } catch (Exception ex) {
-            if (PERCY_DEBUG) { log(ex.toString()); }
-            log("Could not post snapshot " + name);
-        }
-
-    }
-
-    /**
-     * POST the DOM taken from the test browser to the Percy Agent node process.
-     *
-     * @param domSnapshot Stringified & serialized version of the site/applications DOM
-     * @param name        The human-readable name of the snapshot. Should be unique.
-     * @param widths      The browser widths at which you want to take the snapshot.
-     *                    In pixels.
-     * @param minHeight   The minimum height of the resulting snapshot. In pixels.
-     * @param enableJavaScript Enable JavaScript in the Percy rendering environment
-     * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
-     */
-    private void postSnapshot(
-      Map<String, Object> domSnapshot,
-      String name,
       String url,
       Map<String, Object> options
     ) {
