@@ -103,7 +103,7 @@ public class SdkTest {
     driver.get("https://example.com");
     Map<String, Object> options = new HashMap<String, Object>();
     options.put("percyCSS", "body { background-color: purple }");
-    options.put("domTransformation", "(html) => html.body.style.color = 'green';");
+    options.put("domTransformation", "(documentElement) => documentElement.querySelector('body').style.color = 'green';");
     options.put("scope", "div");
     options.put("widths", Arrays.asList(768, 992, 1200));
     percy.snapshot("Site with options", options);
