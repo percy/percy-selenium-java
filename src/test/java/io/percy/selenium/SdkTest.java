@@ -17,6 +17,7 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.firefox.FirefoxDriver;
 import org.openqa.selenium.firefox.FirefoxOptions;
 
+import io.github.bonigarcia.wdm.WebDriverManager;
 
 public class SdkTest {
   private static final String TEST_URL = "http://localhost:8000";
@@ -28,6 +29,7 @@ public class SdkTest {
     // Disable browser logs from being logged to stdout
     System.setProperty(FirefoxDriver.SystemProperty.BROWSER_LOGFILE,"/dev/null");
 
+    WebDriverManager.firefoxdriver().setup();
     TestServer.startServer();
     driver = new FirefoxDriver();
     percy = new Percy(driver);
