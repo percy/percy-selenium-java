@@ -10,7 +10,7 @@ import org.openqa.selenium.WrapsDriver;
  */
 class Environment {
   private WebDriver driver;
-  private final static String SDK_VERSION = "1.0.0";
+  private final static String SDK_VERSION = "1.3.0";
   private final static String SDK_NAME = "percy-java-selenium";
 
   Environment(WebDriver driver) {
