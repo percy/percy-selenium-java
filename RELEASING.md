@@ -1,3 +1,34 @@
+## Automation using Github Actions 
+
+* Bump version 
+  * `Environment.java` (This should ideally pickup from pom.xml dynamically)
+  * `pom.xml` - version & scm > tag
+* commit with following git message `:bookmark: tag`
+* Draft a new release and publish
+* Github actions should automatically release the jar to Maven.
+
+### Updating GPG key in Github actions
+
+* Import private GPG key present in [1pass](#import-the-private-signing-key)
+* find the imported key 
+```sh
+gpg --list-secret-keys
+```
+* update GPG key [expiry date]((#on-gpg-key-management)) if required
+* copy GPG key so it can be pasted on Github as `MAVEN_GPG_PRIVATE_KEY`
+```sh
+gpg --export-secret-keys -a <> | pbcopy
+```
+
+* update `MAVEN_GPG_PASSPHRASE` if required on Github (generally this doesn't change)
+
+
+---
+
+## Manual setup
+
+Only do if required.
+
 ## To make a release
 
 1. One-time setup:
@@ -62,14 +93,14 @@ Create a local `settings.xml` file, placed in `~/.m2/settings.xml`, which will c
     <server>
       <!-- this server id has to match the id used in the repository section of our pom.xml -->
       <id>ossrh</id>
-      <username>USERNAME</username>
-      <password>USER_TOKEN</password>
+      <username>OSSRH_USERNAME</username>
+      <password>OSSRH_TOKEN</password>
     </server>
   </servers>
 </settings>
 ```
 
-The username and token can be generated from https://oss.sonatype.org. Log in with the percy-io credentials, then go to the top right menu (appears clicking on your username) > Profile > select "User token" from the dropdown that also has a "Summary" section. Hit "Access User Token" to get the username and token to use in this file. The token can also be regenerated from this UI, should that ever be necessary.
+The username and token can be generated from https://oss.sonatype.org. Log in with the percy-io credentials, then go to the top right menu (appears clicking on your username) > Profile > select "User token" from the dropdown that also has a "Summary" section. Hit "Access User Token" to get the `OSSRH_USERNAME` and `OSSRH_TOKEN` to use in this file. The token can also be regenerated from this UI, should that ever be necessary.
 
 For detailed documentation on the format of `settings.xml`, see: http://maven.apache.org/ref/3.6.0/maven-settings/settings.html
 
