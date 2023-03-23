@@ -35,14 +35,14 @@ jobs:
           cd /tmp
           git clone --branch master --depth 1 https://github.com/percy/cli
           cd cli
-          PERCY_PACKAGES=`find packages -type d -depth 1 | sed -e 's/packages/@percy/g' | tr '\n' ' '`
+          PERCY_PACKAGES=`find 'packages' -type d -depth 1 | sed -e 's/packages/@percy/g' | tr '\n' ' '`
           echo "Packages: $PERCY_PACKAGES"
           git log -1
           yarn
           yarn build
           yarn global:link
           echo "Finding"
-          find packages -type d -depth 1
+          find './packages' -type d -depth 1
           cd ${{ github.workspace }} 
           echo "Packages: $PERCY_PACKAGES"
           yarn remove @percy/cli && yarn link `echo $PERCY_PACKAGES`
