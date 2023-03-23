@@ -44,7 +44,7 @@ jobs:
           cd ${{ github.workspace }} 
           echo "Packages: $PERCY_PACKAGES"
           yarn remove @percy/cli && yarn link `echo $PERCY_PACKAGES`
-          npx @percy/cli --version
-      - run: MOZ_HEADLESS=1 npx @percy/cli exec -- mvn test
+          npx percy --version
+      - run: MOZ_HEADLESS=1 npx percy exec -- mvn test
         env:
           PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
