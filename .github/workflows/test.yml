@@ -41,7 +41,7 @@ jobs:
           yarn build
           yarn global:link
           cd ${{ github.workspace }} 
-          echo $PERCY_PACKAGES
+          echo "Packages: $PERCY_PACKAGES"
           yarn remove @percy/cli && yarn link `echo $PERCY_PACKAGES`
           npx @percy/cli --version
       - run: MOZ_HEADLESS=1 npx @percy/cli exec -- mvn test
