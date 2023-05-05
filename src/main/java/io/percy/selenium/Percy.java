@@ -24,9 +24,15 @@ import java.util.logging.Logger;
 
 import javax.annotation.Nullable;
 
+import org.openqa.selenium.Capabilities;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebDriverException;
+import org.openqa.selenium.remote.RemoteWebDriver;
+import org.openqa.selenium.remote.TracedCommandExecutor;
+import org.openqa.selenium.remote.HttpCommandExecutor;
+import org.openqa.selenium.remote.CommandExecutor;
+import java.lang.reflect.Field;
 
 /**
  * Percy client for visual testing.
@@ -164,6 +170,56 @@ public class Percy {
         postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
     }
 
+    public void screenshot(String name) {
+        if (!isPercyEnabled) { return; }
+        if (!(driver instanceof RemoteWebDriver)) { return; }
+
+        String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
+        CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
+
+        // Get HttpCommandExecutor From TracedCommandExecutor
+        if (executor instanceof TracedCommandExecutor) {
+            Class className = executor.getClass();
+            try {
+                Field field = className.getDeclaredField("delegate");
+                // make private field accessible
+                field.setAccessible(true);
+                executor = (HttpCommandExecutor)field.get(executor);
+            } catch (Exception e) {
+                log(e.toString());
+                return;
+            }
+        }
+        String remoteWebAddress = ((HttpCommandExecutor) executor).getAddressOfRemoteServer().toString();
+
+        Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
+        HashMap<String, String> capability = new HashMap<String, String>();
+        capability.put("browserName", caps.getBrowserName());
+        capability.put("platform", caps.getCapability("platform") != null ? caps.getCapability("platform").toString() : null);
+        capability.put("version", caps.getCapability("version") != null ? caps.getCapability("version").toString() : null);
+        capability.put("osVersion", caps.getCapability("osVersion") != null ? caps.getCapability("osVersion").toString() : null);
+
+        // Build a JSON object to POST back to the agent node process
+        JSONObject json = new JSONObject();
+        json.put("sessionId", sessionId);
+        json.put("commandExecutorUrl", remoteWebAddress);
+        json.put("capabilities", capability);
+        json.put("snapshotName", name);
+        json.put("clientInfo", env.getClientInfo());
+        json.put("environmentInfo", env.getEnvironmentInfo());
+
+        StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
+
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/automateScreenshot");
+            request.setEntity(entity);
+            HttpResponse response = httpClient.execute(request);
+        } catch (Exception ex) {
+            if (PERCY_DEBUG) { log(ex.toString()); }
+            log("Could not post screenshot " + name);
+        }
+    }
+
     /**
      * Checks to make sure the local Percy server is running. If not, disable Percy.
      */
@@ -175,7 +231,7 @@ public class Percy {
             //Executing the Get request
             HttpResponse response = httpClient.execute(httpget);
             int statusCode = response.getStatusLine().getStatusCode();
-
+            System.out.println(statusCode);
             if (statusCode != 200){
                 throw new RuntimeException("Failed with HTTP error code : " + statusCode);
             }
