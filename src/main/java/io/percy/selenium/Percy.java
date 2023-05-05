@@ -231,7 +231,6 @@ public class Percy {
             //Executing the Get request
             HttpResponse response = httpClient.execute(httpget);
             int statusCode = response.getStatusLine().getStatusCode();
-            System.out.println(statusCode);
             if (statusCode != 200){
                 throw new RuntimeException("Failed with HTTP error code : " + statusCode);
             }
