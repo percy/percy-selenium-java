@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -211,7 +212,9 @@ public class Percy {
         Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
         HashMap<String, String> capabilities = new HashMap<String, String>();
         List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion"));
-        for(String cap : capsNeeded) {
+        Iterator<String> iterator = capsNeeded.iterator();
+        while (iterator.hasNext()) {
+            String cap = iterator.next();
             capabilities.put(cap, caps.getCapability(cap) != null ? caps.getCapability(cap).toString() : null);
         }
 
