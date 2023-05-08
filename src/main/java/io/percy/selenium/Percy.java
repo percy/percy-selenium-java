@@ -209,17 +209,17 @@ public class Percy {
         String remoteWebAddress = ((HttpCommandExecutor) executor).getAddressOfRemoteServer().toString();
 
         Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
-        HashMap<String, String> capability = new HashMap<String, String>();
-        capability.put("browserName", caps.getBrowserName());
-        capability.put("platform", caps.getCapability("platform") != null ? caps.getCapability("platform").toString() : null);
-        capability.put("version", caps.getCapability("version") != null ? caps.getCapability("version").toString() : null);
-        capability.put("osVersion", caps.getCapability("osVersion") != null ? caps.getCapability("osVersion").toString() : null);
+        HashMap<String, String> capabilities = new HashMap<String, String>();
+        List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion"));
+        for(String cap : capsNeeded) {
+            capabilities.put(cap, caps.getCapability(cap) != null ? caps.getCapability(cap).toString() : null);
+        }
 
         // Build a JSON object to POST back to the agent node process
         JSONObject json = new JSONObject(options);
         json.put("sessionId", sessionId);
         json.put("commandExecutorUrl", remoteWebAddress);
-        json.put("capabilities", capability);
+        json.put("capabilities", capabilities);
         json.put("snapshotName", name);
         json.put("clientInfo", env.getClientInfo());
         json.put("environmentInfo", env.getEnvironmentInfo());
