@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -210,7 +211,7 @@ public class Percy {
         String remoteWebAddress = ((HttpCommandExecutor) executor).getAddressOfRemoteServer().toString();
 
         Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
-        HashMap<String, String> capabilities = new HashMap<String, String>();
+        ConcurrentHashMap<String, String> capabilities = new ConcurrentHashMap<String, String>();
         List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion"));
         Iterator<String> iterator = capsNeeded.iterator();
         while (iterator.hasNext()) {
