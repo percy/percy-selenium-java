@@ -170,7 +170,23 @@ public class Percy {
         postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
     }
 
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name      The human-readable name of the screenshot. Should be unique.
+     */
     public void screenshot(String name) {
+        Map<String, Object> options = new HashMap<String, Object>();
+        screenshot(name, options);
+    }
+
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name      The human-readable name of the screenshot. Should be unique.
+     * @param options   Extra options
+     */
+    public void screenshot(String name, Map<String, Object> options) {
         if (!isPercyEnabled) { return; }
         if (!(driver instanceof RemoteWebDriver)) { return; }
 
@@ -200,7 +216,7 @@ public class Percy {
         capability.put("osVersion", caps.getCapability("osVersion") != null ? caps.getCapability("osVersion").toString() : null);
 
         // Build a JSON object to POST back to the agent node process
-        JSONObject json = new JSONObject();
+        JSONObject json = new JSONObject(options);
         json.put("sessionId", sessionId);
         json.put("commandExecutorUrl", remoteWebAddress);
         json.put("capabilities", capability);
