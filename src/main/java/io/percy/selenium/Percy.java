@@ -216,7 +216,9 @@ public class Percy {
         Iterator<String> iterator = capsNeeded.iterator();
         while (iterator.hasNext()) {
             String cap = iterator.next();
-            capabilities.put(cap, caps.getCapability(cap) != null ? caps.getCapability(cap).toString() : null);
+            if (caps.getCapability(cap) != null) {
+                capabilities.put(cap, caps.getCapability(cap).toString());
+            }
         }
 
         // Build a JSON object to POST back to the agent node process
