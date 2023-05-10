@@ -1,5 +1,6 @@
 package io.percy.selenium;
 
+import org.apache.commons.exec.util.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -190,8 +191,9 @@ public class Percy {
      */
     public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return; }
-        if (driver.getClass() != RemoteWebDriver.class) { throw new UnsupportedOperationException(
-                String.format("Driver should be of type RemoteWebDriver, passed is %s", driver.getClass())
+        String driverClass = driver.getClass().toString().split("\\$")[0]; // Added to handle testcase (mocked driver)
+        if (!driverClass.equals(RemoteWebDriver.class.toString())) { throw new UnsupportedOperationException(
+                String.format("Driver should be of type RemoteWebDriver, passed is %s", driverClass)
         ); }
 
         String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
