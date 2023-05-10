@@ -191,7 +191,9 @@ public class Percy {
      */
     public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return; }
-        String driverClass = driver.getClass().toString().split("\\$")[0]; // Added to handle testcase (mocked driver)
+        List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
+        Iterator<String> driverIterator = driverArray.iterator();
+        String driverClass = driverIterator.next();
         if (!driverClass.equals(RemoteWebDriver.class.toString())) { throw new UnsupportedOperationException(
                 String.format("Driver should be of type RemoteWebDriver, passed is %s", driverClass)
         ); }
