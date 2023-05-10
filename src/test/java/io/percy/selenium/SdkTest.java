@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
@@ -112,6 +113,12 @@ import java.net.URL;
     percy.snapshot("Site with options", options);
   }
 
+    @Test
+    public void takeScreenshotWhenNonRemoteWebDriver() {
+      assertThrows(UnsupportedOperationException.class, () -> {
+        percy.screenshot("Test");
+      });
+    }
   @Test
   public void takeScreenshot() {
     RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);

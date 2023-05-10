@@ -177,7 +177,7 @@ public class Percy {
      *
      * @param name      The human-readable name of the screenshot. Should be unique.
      */
-    public void screenshot(String name) {
+    public void screenshot(String name) throws UnsupportedOperationException {
         Map<String, Object> options = new HashMap<String, Object>();
         screenshot(name, options);
     }
@@ -188,9 +188,9 @@ public class Percy {
      * @param name      The human-readable name of the screenshot. Should be unique.
      * @param options   Extra options
      */
-    public void screenshot(String name, Map<String, Object> options) {
+    public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return; }
-        if (!(driver instanceof RemoteWebDriver)) { return; }
+        if (driver.getClass() != RemoteWebDriver.class) { throw new UnsupportedOperationException("Driver should be of type RemoteWebDriver"); }
 
         String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
         CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
@@ -212,7 +212,7 @@ public class Percy {
 
         Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
         ConcurrentHashMap<String, String> capabilities = new ConcurrentHashMap<String, String>();
-        List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion"));
+        List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion", "proxy"));
         Iterator<String> iterator = capsNeeded.iterator();
         while (iterator.hasNext()) {
             String cap = iterator.next();
