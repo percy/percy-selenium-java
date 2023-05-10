@@ -190,7 +190,9 @@ public class Percy {
      */
     public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return; }
-        if (driver.getClass() != RemoteWebDriver.class) { throw new UnsupportedOperationException("Driver should be of type RemoteWebDriver"); }
+        if (driver.getClass() != RemoteWebDriver.class) { throw new UnsupportedOperationException(
+                String.format("Driver should be of type RemoteWebDriver, passed is %s", driver.getClass())
+        ); }
 
         String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
         CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
