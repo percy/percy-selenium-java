@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.json.JSONObject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -127,13 +128,14 @@ import java.net.URL;
       when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
     } catch (Exception e) {
     }
-    percy = new Percy(mockedDriver);
+    percy = spy(new Percy(mockedDriver));
     when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
     when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
     DesiredCapabilities capabilities = new DesiredCapabilities();
     capabilities.setCapability("browserName", "Chrome");
     when(mockedDriver.getCapabilities()).thenReturn(capabilities);
     percy.screenshot("Test");
+    verify(percy).request(eq("/percy/automateScreenshot"), any(), eq("Test"));
   }
 
     @Test
@@ -144,7 +146,7 @@ import java.net.URL;
         when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
       } catch (Exception e) {
       }
-      percy = new Percy(mockedDriver);
+      percy = spy(new Percy(mockedDriver));
       when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
       when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
       DesiredCapabilities capabilities = new DesiredCapabilities();
@@ -153,5 +155,6 @@ import java.net.URL;
       Map<String, Object> options = new HashMap<String, Object>();
       options.put("scope", "div");
       percy.screenshot("Test", options);
+      verify(percy).request(eq("/percy/automateScreenshot"), any(), eq("Test"));
     }
 }

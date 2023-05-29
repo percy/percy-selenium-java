@@ -62,6 +62,8 @@ public class Percy {
     // Environment information like Java, browser, & SDK versions
     private Environment env;
 
+    // Fetch following properties from capabilities
+    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion", "proxy"));
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
      *               session to snapshot.
@@ -218,7 +220,7 @@ public class Percy {
 
         Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
         ConcurrentHashMap<String, String> capabilities = new ConcurrentHashMap<String, String>();
-        List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion", "proxy"));
+
         Iterator<String> iterator = capsNeeded.iterator();
         while (iterator.hasNext()) {
             String cap = iterator.next();
@@ -236,16 +238,7 @@ public class Percy {
         json.put("clientInfo", env.getClientInfo());
         json.put("environmentInfo", env.getEnvironmentInfo());
 
-        StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
-
-        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
-            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/automateScreenshot");
-            request.setEntity(entity);
-            HttpResponse response = httpClient.execute(request);
-        } catch (Exception ex) {
-            if (PERCY_DEBUG) { log(ex.toString()); }
-            log("Could not post screenshot " + name);
-        }
+        request("/percy/automateScreenshot", json, name);
     }
 
     /**
@@ -350,17 +343,27 @@ public class Percy {
         json.put("clientInfo", env.getClientInfo());
         json.put("environmentInfo", env.getEnvironmentInfo());
 
+        request("/percy/snapshot", json, name);
+    }
+
+    /**
+     * POST data to the Percy Agent node process.
+     *
+     * @param url         Endpoint to be called.
+     * @param name        The human-readable name of the snapshot. Should be unique.
+     * @param json        Json object of all properties.
+     */
+    protected void request(String url, JSONObject json, String name) {
         StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
 
         try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
-            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/snapshot");
+            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + url);
             request.setEntity(entity);
             HttpResponse response = httpClient.execute(request);
         } catch (Exception ex) {
             if (PERCY_DEBUG) { log(ex.toString()); }
             log("Could not post snapshot " + name);
         }
-
     }
 
     /**
