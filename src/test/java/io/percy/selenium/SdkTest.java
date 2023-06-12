@@ -153,7 +153,9 @@ import java.net.URL;
       capabilities.setCapability("browserName", "Chrome");
       when(mockedDriver.getCapabilities()).thenReturn(capabilities);
       Map<String, Object> options = new HashMap<String, Object>();
-      options.put("scope", "div");
+      RemoteWebElement mockedElement = mock(RemoteWebElement.class);
+      when(mockedElement.getId()).thenReturn("1234");
+      options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
       percy.screenshot("Test", options);
       verify(percy).request(eq("/percy/automateScreenshot"), any(), eq("Test"));
     }
