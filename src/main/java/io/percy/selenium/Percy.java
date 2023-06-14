@@ -15,12 +15,7 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.json.JSONObject;
 
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -226,7 +221,7 @@ public class Percy {
         }
 
         if (options.containsKey(ignoreElementKey)) {
-            List<String> ignoreElementIds = getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey));
+            List<String> ignoreElementIds =  Collections.synchronizedList(getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey)));
             options.replace(ignoreElementKey, ignoreElementIds);
         }
 
