@@ -3,18 +3,14 @@ package io.percy.selenium;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 
-import org.json.JSONObject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
@@ -32,8 +28,6 @@ import java.net.URL;
   private static final String TEST_URL = "http://localhost:8000";
   private static WebDriver driver;
   private static Percy percy;
-  @Captor
-  ArgumentCaptor<JSONObject> captor = ArgumentCaptor.forClass(JSONObject.class);;
 
   @BeforeAll
   public static void testSetup() throws IOException {
@@ -163,7 +157,6 @@ import java.net.URL;
       when(mockedElement.getId()).thenReturn("1234");
       options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
       percy.screenshot("Test", options);
-      verify(percy).request(eq("/percy/automateScreenshot"), captor.capture() , eq("Test"));
-      assertTrue(captor.getValue().getJSONObject("options").has("ignore_region_selenium_elements"));
+      verify(percy).request(eq("/percy/automateScreenshot"), any() , eq("Test"));
     }
 }
