@@ -221,7 +221,7 @@ public class Percy {
         }
 
         if (options.containsKey(ignoreElementKey)) {
-            List<String> ignoreElementIds =  Collections.synchronizedList(getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey)));
+            List<String> ignoreElementIds =  getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey));
             options.replace(ignoreElementKey, ignoreElementIds);
         }
 

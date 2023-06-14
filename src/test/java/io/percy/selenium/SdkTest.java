@@ -3,6 +3,7 @@ package io.percy.selenium;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 import org.json.JSONObject;
@@ -163,6 +164,7 @@ import java.net.URL;
       options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
       percy.screenshot("Test", options);
       verify(percy).request(eq("/percy/automateScreenshot"), captor.capture() , eq("Test"));
-      assertEquals("1234", captor.getValue().getJSONObject("options").getJSONArray("ignore_region_selenium_elements").get(0));
+      Iterator elementId = captor.getValue().getJSONObject("options").getJSONArray("ignore_region_selenium_elements").iterator();
+      assertEquals("1234", elementId.next());
     }
 }
