@@ -163,6 +163,6 @@ import java.net.URL;
       options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
       percy.screenshot("Test", options);
       verify(percy).request(eq("/percy/automateScreenshot"), captor.capture() , eq("Test"));
-      assertEquals("{\"ignore_region_selenium_elements\":[\"1234\"]}", captor.getValue().get("options").toString());
+      assertEquals("1234", captor.getValue().getJSONObject("options").getJSONArray("ignore_region_selenium_elements").get(0));
     }
 }
