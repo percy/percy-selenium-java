@@ -15,26 +15,16 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.json.JSONObject;
 
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.annotation.Nullable;
 
-import org.openqa.selenium.Capabilities;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebDriverException;
-import org.openqa.selenium.remote.RemoteWebDriver;
-import org.openqa.selenium.remote.TracedCommandExecutor;
-import org.openqa.selenium.remote.HttpCommandExecutor;
-import org.openqa.selenium.remote.CommandExecutor;
+import org.openqa.selenium.*;
+import org.openqa.selenium.remote.*;
+
 import java.lang.reflect.Field;
 
 /**
@@ -64,6 +54,7 @@ public class Percy {
 
     // Fetch following properties from capabilities
     private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion", "proxy"));
+    private final String ignoreElementKey = "ignore_region_selenium_elements";
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
      *               session to snapshot.
@@ -229,14 +220,20 @@ public class Percy {
             }
         }
 
+        if (options.containsKey(ignoreElementKey)) {
+            List<String> ignoreElementIds =  getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey));
+            options.replace(ignoreElementKey, ignoreElementIds);
+        }
+
         // Build a JSON object to POST back to the agent node process
-        JSONObject json = new JSONObject(options);
+        JSONObject json = new JSONObject();
         json.put("sessionId", sessionId);
         json.put("commandExecutorUrl", remoteWebAddress);
         json.put("capabilities", capabilities);
         json.put("snapshotName", name);
         json.put("clientInfo", env.getClientInfo());
         json.put("environmentInfo", env.getEnvironmentInfo());
+        json.put("options", options);
 
         request("/percy/automateScreenshot", json, name);
     }
@@ -376,6 +373,15 @@ public class Percy {
         jsBuilder.append(String.format("return PercyDOM.serialize(%s)\n", json.toString()));
 
         return jsBuilder.toString();
+    }
+
+    private List<String> getElementIdFromElement(List<RemoteWebElement> elements) {
+        List<String> ignoredElementsArray = new ArrayList<>();
+        for (int index = 0; index < elements.size(); index++) {
+                String elementId = elements.get(index).getId();
+                ignoredElementsArray.add(elementId);
+        }
+        return ignoredElementsArray;
     }
 
     private void log(String message) {
