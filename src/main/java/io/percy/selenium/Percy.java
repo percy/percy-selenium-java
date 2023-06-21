@@ -222,7 +222,8 @@ public class Percy {
 
         if (options.containsKey(ignoreElementKey)) {
             List<String> ignoreElementIds =  getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey));
-            options.replace(ignoreElementKey, ignoreElementIds);
+            options.remove(ignoreElementKey);
+            options.put("ignore_region_elements", ignoreElementIds);
         }
 
         // Build a JSON object to POST back to the agent node process
