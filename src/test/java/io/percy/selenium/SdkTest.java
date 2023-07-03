@@ -9,6 +9,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
@@ -19,7 +21,10 @@ import org.openqa.selenium.firefox.FirefoxOptions;
 
 import io.github.bonigarcia.wdm.WebDriverManager;
 
-public class SdkTest {
+import org.openqa.selenium.remote.*;
+import static org.mockito.Mockito.*;
+import java.net.URL;
+  public class SdkTest {
   private static final String TEST_URL = "http://localhost:8000";
   private static WebDriver driver;
   private static Percy percy;
@@ -108,4 +113,50 @@ public class SdkTest {
     options.put("widths", Arrays.asList(768, 992, 1200));
     percy.snapshot("Site with options", options);
   }
+
+    @Test
+    public void takeScreenshotWhenNonRemoteWebDriver() {
+      assertThrows(UnsupportedOperationException.class, () -> {
+        percy.screenshot("Test");
+      });
+    }
+  @Test
+  public void takeScreenshot() {
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    HttpCommandExecutor commandExecutor = mock(HttpCommandExecutor.class);
+    try {
+      when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
+    } catch (Exception e) {
+    }
+    percy = spy(new Percy(mockedDriver));
+    when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
+    when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
+    DesiredCapabilities capabilities = new DesiredCapabilities();
+    capabilities.setCapability("browserName", "Chrome");
+    when(mockedDriver.getCapabilities()).thenReturn(capabilities);
+    percy.screenshot("Test");
+    verify(percy).request(eq("/percy/automateScreenshot"), any(), eq("Test"));
+  }
+
+    @Test
+    public void takeScreenshotWithOptions() {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      HttpCommandExecutor commandExecutor = mock(HttpCommandExecutor.class);
+      try {
+        when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
+      } catch (Exception e) {
+      }
+      percy = spy(new Percy(mockedDriver));
+      when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
+      when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
+      DesiredCapabilities capabilities = new DesiredCapabilities();
+      capabilities.setCapability("browserName", "Chrome");
+      when(mockedDriver.getCapabilities()).thenReturn(capabilities);
+      Map<String, Object> options = new HashMap<String, Object>();
+      RemoteWebElement mockedElement = mock(RemoteWebElement.class);
+      when(mockedElement.getId()).thenReturn("1234");
+      options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
+      percy.screenshot("Test", options);
+      verify(percy).request(eq("/percy/automateScreenshot"), any() , eq("Test"));
+    }
 }

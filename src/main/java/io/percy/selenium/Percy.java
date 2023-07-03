@@ -1,5 +1,6 @@
 package io.percy.selenium;
 
+import org.apache.commons.exec.util.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -14,19 +15,17 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.json.JSONObject;
 
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.annotation.Nullable;
 
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebDriverException;
+import org.openqa.selenium.*;
+import org.openqa.selenium.remote.*;
+
+import java.lang.reflect.Field;
 
 /**
  * Percy client for visual testing.
@@ -53,6 +52,9 @@ public class Percy {
     // Environment information like Java, browser, & SDK versions
     private Environment env;
 
+    // Fetch following properties from capabilities
+    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
+    private final String ignoreElementKey = "ignore_region_selenium_elements";
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
      *               session to snapshot.
@@ -165,6 +167,79 @@ public class Percy {
     }
 
     /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name      The human-readable name of the screenshot. Should be unique.
+     */
+    public void screenshot(String name) throws UnsupportedOperationException {
+        Map<String, Object> options = new HashMap<String, Object>();
+        screenshot(name, options);
+    }
+
+    /**
+     * Take a snapshot and upload it to Percy.
+     *
+     * @param name      The human-readable name of the screenshot. Should be unique.
+     * @param options   Extra options
+     */
+    public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
+        if (!isPercyEnabled) { return; }
+        List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
+        Iterator<String> driverIterator = driverArray.iterator();
+        String driverClass = driverIterator.next();
+        if (!driverClass.equals(RemoteWebDriver.class.toString())) { throw new UnsupportedOperationException(
+                String.format("Driver should be of type RemoteWebDriver, passed is %s", driverClass)
+        ); }
+
+        String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
+        CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
+
+        // Get HttpCommandExecutor From TracedCommandExecutor
+        if (executor instanceof TracedCommandExecutor) {
+            Class className = executor.getClass();
+            try {
+                Field field = className.getDeclaredField("delegate");
+                // make private field accessible
+                field.setAccessible(true);
+                executor = (HttpCommandExecutor)field.get(executor);
+            } catch (Exception e) {
+                log(e.toString());
+                return;
+            }
+        }
+        String remoteWebAddress = ((HttpCommandExecutor) executor).getAddressOfRemoteServer().toString();
+
+        Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
+        ConcurrentHashMap<String, String> capabilities = new ConcurrentHashMap<String, String>();
+
+        Iterator<String> iterator = capsNeeded.iterator();
+        while (iterator.hasNext()) {
+            String cap = iterator.next();
+            if (caps.getCapability(cap) != null) {
+                capabilities.put(cap, caps.getCapability(cap).toString());
+            }
+        }
+
+        if (options.containsKey(ignoreElementKey)) {
+            List<String> ignoreElementIds =  getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey));
+            options.remove(ignoreElementKey);
+            options.put("ignore_region_elements", ignoreElementIds);
+        }
+
+        // Build a JSON object to POST back to the agent node process
+        JSONObject json = new JSONObject();
+        json.put("sessionId", sessionId);
+        json.put("commandExecutorUrl", remoteWebAddress);
+        json.put("capabilities", capabilities);
+        json.put("snapshotName", name);
+        json.put("clientInfo", env.getClientInfo());
+        json.put("environmentInfo", env.getEnvironmentInfo());
+        json.put("options", options);
+
+        request("/percy/automateScreenshot", json, name);
+    }
+
+    /**
      * Checks to make sure the local Percy server is running. If not, disable Percy.
      */
     private boolean healthcheck() {
@@ -266,17 +341,27 @@ public class Percy {
         json.put("clientInfo", env.getClientInfo());
         json.put("environmentInfo", env.getEnvironmentInfo());
 
+        request("/percy/snapshot", json, name);
+    }
+
+    /**
+     * POST data to the Percy Agent node process.
+     *
+     * @param url         Endpoint to be called.
+     * @param name        The human-readable name of the snapshot. Should be unique.
+     * @param json        Json object of all properties.
+     */
+    protected void request(String url, JSONObject json, String name) {
         StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
 
         try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
-            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + "/percy/snapshot");
+            HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + url);
             request.setEntity(entity);
             HttpResponse response = httpClient.execute(request);
         } catch (Exception ex) {
             if (PERCY_DEBUG) { log(ex.toString()); }
             log("Could not post snapshot " + name);
         }
-
     }
 
     /**
@@ -289,6 +374,15 @@ public class Percy {
         jsBuilder.append(String.format("return PercyDOM.serialize(%s)\n", json.toString()));
 
         return jsBuilder.toString();
+    }
+
+    private List<String> getElementIdFromElement(List<RemoteWebElement> elements) {
+        List<String> ignoredElementsArray = new ArrayList<>();
+        for (int index = 0; index < elements.size(); index++) {
+                String elementId = elements.get(index).getId();
+                ignoredElementsArray.add(elementId);
+        }
+        return ignoredElementsArray;
     }
 
     private void log(String message) {
