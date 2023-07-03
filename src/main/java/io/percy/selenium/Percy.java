@@ -53,7 +53,7 @@ public class Percy {
     private Environment env;
 
     // Fetch following properties from capabilities
-    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "version", "osVersion", "proxy"));
+    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
     private final String ignoreElementKey = "ignore_region_selenium_elements";
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
