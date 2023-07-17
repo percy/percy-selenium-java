@@ -55,6 +55,7 @@ public class Percy {
     // Fetch following properties from capabilities
     private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
     private final String ignoreElementKey = "ignore_region_selenium_elements";
+    private final String considerElementKey = "consider_region_selenium_elements";
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
      *               session to snapshot.
@@ -224,6 +225,12 @@ public class Percy {
             List<String> ignoreElementIds =  getElementIdFromElement((List<RemoteWebElement>) options.get(ignoreElementKey));
             options.remove(ignoreElementKey);
             options.put("ignore_region_elements", ignoreElementIds);
+        }
+
+        if (options.containsKey(considerElementKey)) {
+            List<String> considerElementIds = getElementIdFromElement((List<RemoteWebElement>) options.get(considerElementKey));
+            options.remove(considerElementKey);
+            options.put("consider_region_elements", considerElementIds);
         }
 
         // Build a JSON object to POST back to the agent node process
