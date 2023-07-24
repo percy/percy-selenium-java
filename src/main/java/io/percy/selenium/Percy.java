@@ -223,12 +223,12 @@ public class Percy {
             }
         }
 
-        if (options.ContainsKey(ignoreElementAltKey)) {
+        if (options.containsKey(ignoreElementAltKey)) {
             options.put(ignoreElementKey, options.get(ignoreElementAltKey));
             options.remove(ignoreElementAltKey);
         }
 
-        if (options.ContainsKey(considerElementAltKey)) {
+        if (options.containsKey(considerElementAltKey)) {
             options.put(considerElementKey, options.get(considerElementAltKey));
             options.remove(considerElementAltKey);
         }
