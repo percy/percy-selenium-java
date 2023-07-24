@@ -55,7 +55,9 @@ public class Percy {
     // Fetch following properties from capabilities
     private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
     private final String ignoreElementKey = "ignore_region_selenium_elements";
+    private final String ignoreElementAltKey = "ignoreRegionSeleniumElements";
     private final String considerElementKey = "consider_region_selenium_elements";
+    private final String considerElementAltKey = "considerRegionSeleniumElements";
     /**
      * @param driver The Selenium WebDriver object that will hold the browser
      *               session to snapshot.
@@ -219,6 +221,16 @@ public class Percy {
             if (caps.getCapability(cap) != null) {
                 capabilities.put(cap, caps.getCapability(cap).toString());
             }
+        }
+
+        if (options.ContainsKey(ignoreElementAltKey)) {
+            options.put(ignoreElementKey, options.get(ignoreElementAltKey));
+            options.remove(ignoreElementAltKey);
+        }
+
+        if (options.ContainsKey(considerElementAltKey)) {
+            options.put(considerElementKey, options.get(considerElementAltKey));
+            options.remove(considerElementAltKey);
         }
 
         if (options.containsKey(ignoreElementKey)) {
