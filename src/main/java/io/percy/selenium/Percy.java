@@ -169,15 +169,6 @@ public class Percy {
         postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
     }
 
-    public boolean isTracedCommandExecutor() {
-        try {
-            Class.forName("org.openqa.selenium.remote.TracedCommandExecutor");
-            return true;
-        } catch (final ClassNotFoundException e) {
-            return false;
-        }
-    }
-
     /**
      * Take a snapshot and upload it to Percy.
      *
@@ -207,7 +198,7 @@ public class Percy {
         CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
 
         // Get HttpCommandExecutor From TracedCommandExecutor
-        if (isTracedCommandExecutor()) {
+        if (executor.getClass().toString().contains("TracedCommandExecutor")) {
             Class className = executor.getClass();
             try {
                 Field field = className.getDeclaredField("delegate");
