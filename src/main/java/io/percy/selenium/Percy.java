@@ -41,10 +41,10 @@ public class Percy {
     private String PERCY_SERVER_ADDRESS = System.getenv().getOrDefault("PERCY_SERVER_ADDRESS", "http://localhost:5338");
 
     // Determine if we're debug logging
-    private boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
+    private static boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
 
     // for logging
-    private String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
+    private static String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
 
     // Is the Percy server running or not
     private boolean isPercyEnabled = healthcheck();
@@ -194,34 +194,10 @@ public class Percy {
                 String.format("Driver should be of type RemoteWebDriver, passed is %s", driverClass)
         ); }
 
-        String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
-        CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
-
-        // Get HttpCommandExecutor From TracedCommandExecutor
-        if (executor.getClass().toString().contains("TracedCommandExecutor")) {
-            Class className = executor.getClass();
-            try {
-                Field field = className.getDeclaredField("delegate");
-                // make private field accessible
-                field.setAccessible(true);
-                executor = (HttpCommandExecutor)field.get(executor);
-            } catch (Exception e) {
-                log(e.toString());
-                return;
-            }
-        }
-        String remoteWebAddress = ((HttpCommandExecutor) executor).getAddressOfRemoteServer().toString();
-
-        Capabilities caps = ((RemoteWebDriver) driver).getCapabilities();
-        ConcurrentHashMap<String, String> capabilities = new ConcurrentHashMap<String, String>();
-
-        Iterator<String> iterator = capsNeeded.iterator();
-        while (iterator.hasNext()) {
-            String cap = iterator.next();
-            if (caps.getCapability(cap) != null) {
-                capabilities.put(cap, caps.getCapability(cap).toString());
-            }
-        }
+        DriverMetadata driverMetadata = new DriverMetadata(driver);
+        String sessionId = driverMetadata.getSessionId();
+        String remoteWebAddress = driverMetadata.getCommandExecutorUrl();
+        ConcurrentHashMap<String, String> capabilities = driverMetadata.getCapabilities();
 
         if (options.containsKey(ignoreElementAltKey)) {
             options.put(ignoreElementKey, options.get(ignoreElementAltKey));
@@ -404,7 +380,7 @@ public class Percy {
         return ignoredElementsArray;
     }
 
-    private void log(String message) {
+    protected static void log(String message) {
         System.out.println(LABEL + " " + message);
     }
 }
