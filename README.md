@@ -146,9 +146,9 @@ $ percy config:migrate
 ```
 
 ## Running Percy on Automate
-`percyScreenshot(driver, name, options)` [ needs @percy/cli 1.27.0-beta.0+ ];
+`percy.screenshot(driver, name, options)` [ needs @percy/cli 1.27.0-beta.0+ ];
 
-This is an example test using the `percy.Screenshot` method.
+This is an example test using the `percy.screenshot` method.
 
 ``` java
 // import ...
@@ -171,7 +171,7 @@ public class Example {
 
 - `driver` (**required**) - A selenium driver instance
 - `name` (**required**) - The screenshot name; must be unique to each screenshot
-- `options` (**optional**) - There are various options supported by percy_screenshot to server further functionality.
+- `options` (**optional**) - There are various options supported by percy.screenshot to server further functionality.
   - `freezeAnimation` - Boolean value by default it falls back to `false`, you can pass `true` and percy will freeze image based animations.
   - `percyCSS` - Custom CSS to be added to DOM before the screenshot being taken. Note: This gets removed once the screenshot is taken.
   - `ignoreRegionXpaths` - elements in the DOM can be ignored using xpath
