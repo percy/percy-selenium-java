@@ -7,7 +7,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.Assert;
+//import org.junit.Assert;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -52,7 +52,7 @@ public class CacheTest {
     public void testSessionId() {
         Cache.CACHE_MAP.clear();
         DriverMetadata driverMetadata = new DriverMetadata((WebDriver) mockedDriver);
-        Assert.assertEquals(driverMetadata.getSessionId(), "123");
+        assertEquals(driverMetadata.getSessionId(), "123");
     }
 
     @Test
@@ -60,9 +60,9 @@ public class CacheTest {
         Cache.CACHE_MAP.clear();
         DriverMetadata driverMetadata = new DriverMetadata((WebDriver) mockedDriver);
         String key = "capabilities_"+driverMetadata.getSessionId();
-        Assert.assertEquals(Cache.CACHE_MAP.get(key), null);
+        assertNull(Cache.CACHE_MAP.get(key));
         ConcurrentHashMap<String, String> caps = driverMetadata.getCapabilities();
-        Assert.assertEquals(Cache.CACHE_MAP.get(key), caps);
+        assertEquals(Cache.CACHE_MAP.get(key), caps);
     }
 
     @Test
@@ -70,8 +70,8 @@ public class CacheTest {
         Cache.CACHE_MAP.clear();
         DriverMetadata driverMetadata = new DriverMetadata(mockedDriver);
         String key = "commandExecutorUrl_"+driverMetadata.getSessionId();
-        Assert.assertEquals(Cache.CACHE_MAP.get(key), null);
+        assertNull(Cache.CACHE_MAP.get(key));
         String commandExecutorUrl = driverMetadata.getCommandExecutorUrl();
-        Assert.assertEquals(Cache.CACHE_MAP.get(key), commandExecutorUrl);
+        assertEquals(Cache.CACHE_MAP.get(key), commandExecutorUrl);
     }
 }
