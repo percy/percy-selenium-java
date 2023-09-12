@@ -198,7 +198,7 @@ public class Percy {
         CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
 
         // Get HttpCommandExecutor From TracedCommandExecutor
-        if (executor instanceof TracedCommandExecutor) {
+        if (executor.getClass().toString().contains("TracedCommandExecutor")) {
             Class className = executor.getClass();
             try {
                 Field field = className.getDeclaredField("delegate");
