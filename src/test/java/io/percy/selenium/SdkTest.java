@@ -114,12 +114,6 @@ import java.net.URL;
     percy.snapshot("Site with options", options);
   }
 
-    @Test
-    public void takeScreenshotWhenNonRemoteWebDriver() {
-      assertThrows(UnsupportedOperationException.class, () -> {
-        percy.screenshot("Test");
-      });
-    }
   @Test
   public void takeScreenshot() {
     RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);

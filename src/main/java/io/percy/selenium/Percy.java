@@ -190,9 +190,6 @@ public class Percy {
         List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
         Iterator<String> driverIterator = driverArray.iterator();
         String driverClass = driverIterator.next();
-        if (!driverClass.equals(RemoteWebDriver.class.toString())) { throw new UnsupportedOperationException(
-                String.format("Driver should be of type RemoteWebDriver, passed is %s", driverClass)
-        ); }
 
         String sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
         CommandExecutor executor = ((RemoteWebDriver) driver).getCommandExecutor();
