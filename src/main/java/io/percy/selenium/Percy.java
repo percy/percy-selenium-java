@@ -53,7 +53,7 @@ public class Percy {
     private Environment env;
 
     // Fetch following properties from capabilities
-    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
+    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy", "deviceName"));
     private final String ignoreElementKey = "ignore_region_selenium_elements";
     private final String ignoreElementAltKey = "ignoreRegionSeleniumElements";
     private final String considerElementKey = "consider_region_selenium_elements";
