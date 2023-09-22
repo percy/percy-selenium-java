@@ -46,6 +46,9 @@ public class Percy {
     // for logging
     private String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
 
+    // Type of session automate/web
+    protected String sessionType = null;
+
     // Is the Percy server running or not
     private boolean isPercyEnabled = healthcheck();
 
@@ -154,6 +157,7 @@ public class Percy {
 
     public void snapshot(String name, Map<String, Object> options) {
         if (!isPercyEnabled) { return; }
+        if ("automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://docs.percy.io/docs/integrate-functional-testing-with-visual-testing"); }
 
         Map<String, Object> domSnapshot = null;
 
@@ -187,6 +191,8 @@ public class Percy {
      */
     public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return; }
+        if ("web".equals(sessionType)) { throw new RuntimeException("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing"); }
+
         List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
         Iterator<String> driverIterator = driverArray.iterator();
         String driverClass = driverIterator.next();
@@ -288,6 +294,10 @@ public class Percy {
 
                 return false;
             }
+            HttpEntity entity = response.getEntity();
+            String responseString = EntityUtils.toString(entity, "UTF-8");
+            JSONObject responseObject = new JSONObject(responseString);
+            sessionType = (String) responseObject.optString("type", null);
 
             return true;
         } catch (Exception ex) {

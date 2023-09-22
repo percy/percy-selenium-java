@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -46,6 +47,11 @@ import java.net.URL;
     driver.quit();
     // Shutdown our server and make sure the threadpool also terminates.
     TestServer.shutdown();
+  }
+
+  @BeforeEach
+  public void setSessionType() {
+    percy.sessionType = "web";
   }
 
   @Test
@@ -123,6 +129,7 @@ import java.net.URL;
     } catch (Exception e) {
     }
     percy = spy(new Percy(mockedDriver));
+    percy.sessionType = "automate";
     when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
     when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
     DesiredCapabilities capabilities = new DesiredCapabilities();
@@ -141,6 +148,7 @@ import java.net.URL;
       } catch (Exception e) {
       }
       percy = spy(new Percy(mockedDriver));
+      percy.sessionType = "automate";
       when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
       when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
       DesiredCapabilities capabilities = new DesiredCapabilities();
@@ -154,5 +162,20 @@ import java.net.URL;
       options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
       percy.screenshot("Test", options);
       verify(percy).request(eq("/percy/automateScreenshot"), any() , eq("Test"));
+    }
+
+    @Test
+    public void takeSnapshotThrowErrorForPOA() {
+      percy.sessionType = "automate";
+      Throwable exception = assertThrows(RuntimeException.class, () -> percy.snapshot("Test"));
+      assertEquals("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://docs.percy.io/docs/integrate-functional-testing-with-visual-testing", exception.getMessage());
+    }
+
+    @Test
+    public void takeScreenshotThrowErrorForWeb() {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      percy = spy(new Percy(mockedDriver));
+      Throwable exception = assertThrows(RuntimeException.class, () -> percy.screenshot("Test"));
+      assertEquals("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing", exception.getMessage());
     }
 }
