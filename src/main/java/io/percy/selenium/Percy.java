@@ -53,7 +53,7 @@ public class Percy {
     private Environment env;
 
     // Fetch following properties from capabilities
-    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
+    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy", "deviceName"));
     private final String ignoreElementKey = "ignore_region_selenium_elements";
     private final String ignoreElementAltKey = "ignoreRegionSeleniumElements";
     private final String considerElementKey = "consider_region_selenium_elements";
@@ -190,9 +190,6 @@ public class Percy {
         List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
         Iterator<String> driverIterator = driverArray.iterator();
         String driverClass = driverIterator.next();
-        if (!driverClass.equals(RemoteWebDriver.class.toString())) { throw new UnsupportedOperationException(
-                String.format("Driver should be of type RemoteWebDriver, passed is %s", driverClass)
-        ); }
 
         DriverMetadata driverMetadata = new DriverMetadata(driver);
         String sessionId = driverMetadata.getSessionId();
