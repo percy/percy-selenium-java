@@ -18,7 +18,7 @@ public class DriverMetadata {
     private String sessionId;
     private WebDriver driver;
     private ConcurrentHashMap<String, String> capabilities = new ConcurrentHashMap<String, String>();
-    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy"));
+    private final List<String> capsNeeded = new ArrayList<>(Arrays.asList("browserName", "platform", "platformName", "version", "osVersion", "proxy", "deviceName"));
     public DriverMetadata(WebDriver driver) {
         this.driver = driver;
         this.sessionId = ((RemoteWebDriver) driver).getSessionId().toString();
