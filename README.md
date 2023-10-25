@@ -208,7 +208,7 @@ public class Example {
           region2.put("bottom", 110);
           region2.put("right", 10);
           region2.put("left", 120);
-          customRegion.add(region1);
+          customRegion.add(region2);
           options.put("custom_consider_regions", customRegion);
         ```
       - Parameters:
