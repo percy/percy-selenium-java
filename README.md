@@ -182,14 +182,14 @@ public class Example {
   - `customIgnoreRegions` - List of custom objects. elements can be ignored using custom boundaries
     - Refer to example -
       - ```
-        List<object> ignoreCustomElement = new List<object>();
-        var element = new Dictionary<string, int>();
-        element.Add("top", 10);
-        element.Add("bottom", 120);
-        element.Add("right", 10);
-        element.Add("left", 10);
-        ignoreCustomElement.Add(element);
-        option.Add("custom_ignore_regions", ignoreCustomElement);
+          List<HashMap> customRegion = new ArrayList<>();
+          HashMap<String, Integer> region1 = new HashMap<>();
+          region1.put("top", 10);
+          region1.put("bottom", 110);
+          region1.put("right", 10);
+          region1.put("left", 120);
+          customRegion.add(region1);
+          options.put("custom_ignore_regions", customRegion);
         ```
     - Parameters:
       - `top` (int): Top coordinate of the ignore region.
@@ -202,14 +202,14 @@ public class Example {
   - `customConsiderRegions` - List of custom objects. elements can be considered for diffing and will be ignored by Intelli Ignore using custom boundaries
     - Refer to example -
       - ```
-        List<object> considerCustomElement = new List<object>();
-        var element = new Dictionary<string, int>();
-        element.Add("top", 10);
-        element.Add("bottom", 120);
-        element.Add("right", 10);
-        element.Add("left", 10);
-        considerCustomElement.Add(element);
-        option.Add("custom_ignore_regions", considerCustomElement);
+          List<HashMap> customRegion = new ArrayList<>();
+          HashMap<String, Integer> region2 = new HashMap<>();
+          region2.put("top", 10);
+          region2.put("bottom", 110);
+          region2.put("right", 10);
+          region2.put("left", 120);
+          customRegion.add(region1);
+          options.put("custom_consider_regions", customRegion);
         ```
       - Parameters:
         - `top` (int): Top coordinate of the consider region.
