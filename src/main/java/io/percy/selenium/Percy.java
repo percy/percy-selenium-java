@@ -78,7 +78,7 @@ public class Percy {
      *
      */
     public JSONObject snapshot(String name) {
-        return snapshot(name, null, null, false, null, null, false);
+        return snapshot(name, null, null, false, null, null, null);
     }
 
     /**
@@ -89,7 +89,7 @@ public class Percy {
      *               pixels.
      */
     public JSONObject snapshot(String name, List<Integer> widths) {
-        return snapshot(name, widths, null, false, null, null, false);
+        return snapshot(name, widths, null, false, null, null, null);
     }
 
     /**
@@ -101,7 +101,7 @@ public class Percy {
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      */
     public JSONObject snapshot(String name, List<Integer> widths, Integer minHeight) {
-        return snapshot(name, widths, minHeight, false, null, null, false);
+        return snapshot(name, widths, minHeight, false, null, null, null);
     }
 
     /**
@@ -114,7 +114,7 @@ public class Percy {
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      */
     public JSONObject snapshot(String name, List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
-        return snapshot(name, widths, minHeight, enableJavaScript, null, null, false);
+        return snapshot(name, widths, minHeight, enableJavaScript, null, null, null);
     }
 
     /**
@@ -128,7 +128,7 @@ public class Percy {
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
     public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS) {
-        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, null, false);
+        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, null, null);
     }
 
     /**
@@ -156,7 +156,7 @@ public class Percy {
         return snapshot(name, options);
     }
 
-    public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope, boolean sync) {
+    public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope, @Nullable Boolean sync) {
         if (!isPercyEnabled) { return null; }
 
         Map<String, Object> domSnapshot = null;
