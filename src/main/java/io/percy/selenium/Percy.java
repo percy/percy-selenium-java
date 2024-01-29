@@ -385,7 +385,10 @@ public class Percy {
             request.setEntity(entity);
             HttpResponse response = httpClient.execute(request);
             JSONObject jsonResponse = new JSONObject(EntityUtils.toString(response.getEntity()));
-            return jsonResponse.getJSONObject("data");
+
+            if (jsonResponse.has("data")) {
+                return jsonResponse.getJSONObject("data");
+            }
         } catch (Exception ex) {
             if (PERCY_DEBUG) { log(ex.toString()); }
             log("Could not post snapshot " + name);
