@@ -128,7 +128,7 @@ import java.net.URL;
     options.put("sync", true);
 
     JSONObject data = percy.snapshot("test_sync_cli_snapshot", options);
-    if(data.has("snapshot-name"))
+    if(data != null)
       assertEquals(data.getString("snapshot-name"), "test_sync_cli_snapshot");
   }
 
