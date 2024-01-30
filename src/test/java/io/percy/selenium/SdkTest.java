@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import org.json.JSONObject;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
@@ -118,6 +119,17 @@ import java.net.URL;
     options.put("scope", "div");
     options.put("widths", Arrays.asList(768, 992, 1200));
     percy.snapshot("Site with options", options);
+  }
+
+  @Test
+  public void takeSnapshotWithSyncCLI(){
+    driver.get("https://example.com");
+    Map<String, Object> options = new HashMap<String, Object>();
+    options.put("sync", true);
+
+    JSONObject data = percy.snapshot("test_sync_cli_snapshot", options);
+    if(data.has("snapshot-name"))
+      assertEquals(data.getString("snapshot-name"), "test_sync_cli_snapshot");
   }
 
   @Test
