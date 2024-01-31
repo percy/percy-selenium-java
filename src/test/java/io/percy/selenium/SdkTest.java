@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -15,12 +14,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.openqa.selenium.By;
-import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.firefox.FirefoxDriver;
-import org.openqa.selenium.firefox.FirefoxOptions;
 
 import io.github.bonigarcia.wdm.WebDriverManager;
 
