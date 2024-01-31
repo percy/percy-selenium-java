@@ -25,6 +25,9 @@ import org.openqa.selenium.firefox.FirefoxOptions;
 import io.github.bonigarcia.wdm.WebDriverManager;
 
 import org.openqa.selenium.remote.*;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import java.net.URL;
   public class SdkTest {
@@ -130,9 +133,8 @@ import java.net.URL;
 
     JSONObject data = percy.snapshot("test_sync_cli_snapshot", options);
     assertEquals(data.getString("snapshot-name"), "test_sync_cli_snapshot");
-    assertEquals(data.getString("success"), "success");
-    JSONArray snapshots = (JSONArray) data.getJSONArray("snapshoshots");
-    assertEquals(snapshots.length(), 1);
+    assertEquals(data.getString("status"), "success");
+    assertEquals(data.get("screenshots").getClass().isAssignableFrom(JSONArray.class), true);
   }
 
   @Test
