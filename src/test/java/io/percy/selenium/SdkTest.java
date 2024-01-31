@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
@@ -128,8 +129,10 @@ import java.net.URL;
     options.put("sync", true);
 
     JSONObject data = percy.snapshot("test_sync_cli_snapshot", options);
-    if(data != null)
-      assertEquals(data.getString("snapshot-name"), "test_sync_cli_snapshot");
+    assertEquals(data.getString("snapshot-name"), "test_sync_cli_snapshot");
+    assertEquals(data.getString("success"), "success");
+    JSONArray snapshots = (JSONArray) data.getJSONArray("snapshoshots");
+    assertEquals(snapshots.length(), 1);
   }
 
   @Test
