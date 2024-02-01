@@ -7,11 +7,12 @@ import org.apache.http.HttpResponse;
 import org.apache.http.util.EntityUtils;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
-
+import org.apache.http.impl.client.HttpClients;
 import org.json.JSONObject;
 
 import java.io.InputStream;
@@ -76,8 +77,8 @@ public class Percy {
      * @param name The human-readable name of the snapshot. Should be unique.
      *
      */
-    public void snapshot(String name) {
-        snapshot(name, null, null, false, null, null);
+    public JSONObject snapshot(String name) {
+        return snapshot(name, null, null, false, null, null, null);
     }
 
     /**
@@ -87,8 +88,8 @@ public class Percy {
      * @param widths The browser widths at which you want to take the snapshot. In
      *               pixels.
      */
-    public void snapshot(String name, List<Integer> widths) {
-        snapshot(name, widths, null, false, null, null);
+    public JSONObject snapshot(String name, List<Integer> widths) {
+        return snapshot(name, widths, null, false, null, null, null);
     }
 
     /**
@@ -99,8 +100,8 @@ public class Percy {
      *               pixels.
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      */
-    public void snapshot(String name, List<Integer> widths, Integer minHeight) {
-        snapshot(name, widths, minHeight, false, null, null);
+    public JSONObject snapshot(String name, List<Integer> widths, Integer minHeight) {
+        return snapshot(name, widths, minHeight, false, null, null, null);
     }
 
     /**
@@ -112,8 +113,8 @@ public class Percy {
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      */
-    public void snapshot(String name, List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
-        snapshot(name, widths, minHeight, enableJavaScript, null, null);
+    public JSONObject snapshot(String name, List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
+        return snapshot(name, widths, minHeight, enableJavaScript, null, null, null);
     }
 
     /**
@@ -126,8 +127,8 @@ public class Percy {
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
-    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS) {
-        snapshot(name, widths, minHeight, enableJavaScript, percyCSS, null);
+    public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS) {
+        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, null, null);
     }
 
     /**
@@ -141,8 +142,8 @@ public class Percy {
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      * @param scope    A CSS selector to scope the screenshot to
      */
-    public void snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope) {
-        if (!isPercyEnabled) { return; }
+    public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope) {
+        if (!isPercyEnabled) { return null; }
 
         Map<String, Object> domSnapshot = null;
         Map<String, Object> options = new HashMap<String, Object>();
@@ -152,11 +153,26 @@ public class Percy {
         options.put("percyCSS", percyCSS);
         options.put("scope", scope);
 
-        snapshot(name, options);
+        return snapshot(name, options);
     }
 
-    public void snapshot(String name, Map<String, Object> options) {
-        if (!isPercyEnabled) { return; }
+    public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope, @Nullable Boolean sync) {
+        if (!isPercyEnabled) { return null; }
+
+        Map<String, Object> domSnapshot = null;
+        Map<String, Object> options = new HashMap<String, Object>();
+        options.put("widths", widths);
+        options.put("minHeight", minHeight);
+        options.put("enableJavaScript", enableJavaScript);
+        options.put("percyCSS", percyCSS);
+        options.put("scope", scope);
+        options.put("sync", sync);
+
+        return snapshot(name, options);
+    }
+
+    public JSONObject snapshot(String name, Map<String, Object> options) {
+        if (!isPercyEnabled) { return null; }
         if ("automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://docs.percy.io/docs/integrate-functional-testing-with-visual-testing"); }
 
         Map<String, Object> domSnapshot = null;
@@ -170,7 +186,7 @@ public class Percy {
             if (PERCY_DEBUG) { log(e.getMessage()); }
         }
 
-        postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
+        return postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
     }
 
     /**
@@ -178,9 +194,9 @@ public class Percy {
      *
      * @param name      The human-readable name of the screenshot. Should be unique.
      */
-    public void screenshot(String name) throws UnsupportedOperationException {
+    public JSONObject screenshot(String name) throws UnsupportedOperationException {
         Map<String, Object> options = new HashMap<String, Object>();
-        screenshot(name, options);
+        return screenshot(name, options);
     }
 
     /**
@@ -189,8 +205,8 @@ public class Percy {
      * @param name      The human-readable name of the screenshot. Should be unique.
      * @param options   Extra options
      */
-    public void screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
-        if (!isPercyEnabled) { return; }
+    public JSONObject screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
+        if (!isPercyEnabled) { return null; }
         if ("web".equals(sessionType)) { throw new RuntimeException("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing"); }
 
         List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
@@ -234,7 +250,7 @@ public class Percy {
         json.put("environmentInfo", env.getEnvironmentInfo());
         json.put("options", options);
 
-        request("/percy/automateScreenshot", json, name);
+        return request("/percy/automateScreenshot", json, name);
     }
 
     /**
@@ -327,13 +343,13 @@ public class Percy {
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
-    private void postSnapshot(
+    private JSONObject postSnapshot(
       Map<String, Object> domSnapshot,
       String name,
       String url,
       Map<String, Object> options
     ) {
-        if (!isPercyEnabled) { return; }
+        if (!isPercyEnabled) { return null; }
 
         // Build a JSON object to POST back to the agent node process
         JSONObject json = new JSONObject(options);
@@ -343,7 +359,7 @@ public class Percy {
         json.put("clientInfo", env.getClientInfo());
         json.put("environmentInfo", env.getEnvironmentInfo());
 
-        request("/percy/snapshot", json, name);
+        return request("/percy/snapshot", json, name);
     }
 
     /**
@@ -353,17 +369,31 @@ public class Percy {
      * @param name        The human-readable name of the snapshot. Should be unique.
      * @param json        Json object of all properties.
      */
-    protected void request(String url, JSONObject json, String name) {
+    protected JSONObject request(String url, JSONObject json, String name) {
         StringEntity entity = new StringEntity(json.toString(), ContentType.APPLICATION_JSON);
 
-        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+        int timeout = 600000; // 600 seconds = 600,000 milliseconds
+
+        // Create RequestConfig with timeout
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setSocketTimeout(timeout)
+                .setConnectTimeout(timeout)
+                .build();
+
+        try (CloseableHttpClient httpClient = HttpClients.custom().setDefaultRequestConfig(requestConfig).build()) {
             HttpPost request = new HttpPost(PERCY_SERVER_ADDRESS + url);
             request.setEntity(entity);
             HttpResponse response = httpClient.execute(request);
+            JSONObject jsonResponse = new JSONObject(EntityUtils.toString(response.getEntity()));
+
+            if (jsonResponse.has("data")) {
+                return jsonResponse.getJSONObject("data");
+            }
         } catch (Exception ex) {
             if (PERCY_DEBUG) { log(ex.toString()); }
             log("Could not post snapshot " + name);
         }
+        return null;
     }
 
     /**
