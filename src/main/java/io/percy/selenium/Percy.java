@@ -207,7 +207,7 @@ public class Percy {
      */
     public JSONObject screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return null; }
-        if ("web".equals(sessionType)) { throw new RuntimeException("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing"); }
+        if (!"automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing"); }
 
         List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
         Iterator<String> driverIterator = driverArray.iterator();
