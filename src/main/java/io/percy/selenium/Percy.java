@@ -197,7 +197,12 @@ public class Percy {
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(fetchPercyDOM());
-            Set<Cookie> cookies = driver.manage().getCookies();
+            Set<Cookie> cookies = new HashSet<>();
+            try {
+                cookies = driver.manage().getCookies();
+            } catch(Exception e) {
+                log("Cookie collection failed " + e.getMessage(), "debug");
+            }
             if (isCaptureResponsiveDOM(options)) {
                 domSnapshot = captureResponsiveDom(driver, cookies, options);
             } else {
@@ -205,7 +210,7 @@ public class Percy {
             }
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
-            if (PERCY_DEBUG) { log(e.getMessage()); }
+            log(e.getMessage(), "debug");
         }
 
         return postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
