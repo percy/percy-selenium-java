@@ -184,7 +184,7 @@ public class Percy {
 
     public JSONObject snapshot(String name, Map<String, Object> options) {
         if (!isPercyEnabled) { return null; }
-        if ("automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://docs.percy.io/docs/integrate-functional-testing-with-visual-testing"); }
+        if ("automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://www.browserstack.com/docs/percy/integrate/functional-and-visual"); }
 
         List<Map<String, Object>> domSnapshot = new ArrayList<>();
 
@@ -223,7 +223,7 @@ public class Percy {
      */
     public JSONObject screenshot(String name, Map<String, Object> options) throws UnsupportedOperationException {
         if (!isPercyEnabled) { return null; }
-        if (!"automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing"); }
+        if (!"automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://www.browserstack.com/docs/percy/integrate/overview"); }
 
         List<String> driverArray = Arrays.asList(driver.getClass().toString().split("\\$")); // Added to handle testcase (mocked driver)
         Iterator<String> driverIterator = driverArray.iterator();
@@ -291,7 +291,7 @@ public class Percy {
                 log("You may be using @percy/agent" +
                     "which is no longer supported by this SDK." +
                     "Please uninstall @percy/agent and install @percy/cli instead." +
-                    "https://docs.percy.io/docs/migrating-to-percy-cli"
+                    "https://www.browserstack.com/docs/percy/migration/migrate-to-cli"
                     );
 
                 return false;

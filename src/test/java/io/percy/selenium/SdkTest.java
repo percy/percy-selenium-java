@@ -197,7 +197,7 @@ import java.net.URL;
     public void takeSnapshotThrowErrorForPOA() {
       percy.sessionType = "automate";
       Throwable exception = assertThrows(RuntimeException.class, () -> percy.snapshot("Test"));
-      assertEquals("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://docs.percy.io/docs/integrate-functional-testing-with-visual-testing", exception.getMessage());
+      assertEquals("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://www.browserstack.com/docs/percy/integrate/functional-and-visual", exception.getMessage());
     }
 
     @Test
@@ -205,6 +205,6 @@ import java.net.URL;
       RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
       percy = spy(new Percy(mockedDriver));
       Throwable exception = assertThrows(RuntimeException.class, () -> percy.screenshot("Test"));
-      assertEquals("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing", exception.getMessage());
+      assertEquals("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://www.browserstack.com/docs/percy/integrate/overview", exception.getMessage());
     }
 }
