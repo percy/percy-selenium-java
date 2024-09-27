@@ -171,9 +171,12 @@ public class Percy {
     }
 
     private boolean isCaptureResponsiveDOM(Map<String, Object> options) {
-        JSONObject percyProperty = CLIconfig.getJSONObject("percy");
-        if (percyProperty != null && percyProperty.has("deferUploads") && percyProperty.getBoolean("deferUploads")) {
-            return false;
+        if (CLIconfig.has("percy") && !CLIconfig.isNull("percy")) {
+            JSONObject percyProperty = CLIconfig.getJSONObject("percy");
+
+            if (percyProperty.has("deferUploads") && !percyProperty.isNull("deferUploads") && percyProperty.getBoolean("deferUploads")) {
+                return false;
+            }
         }
 
         boolean responsiveSnapshotCaptureCLI = CLIconfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
