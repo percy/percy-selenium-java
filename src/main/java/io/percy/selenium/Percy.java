@@ -179,7 +179,10 @@ public class Percy {
             }
         }
 
-        boolean responsiveSnapshotCaptureCLI = CLIconfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
+        boolean responsiveSnapshotCaptureCLI = false;
+        if (CLIconfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
+            responsiveSnapshotCaptureCLI = CLIconfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
+        }
         Object responsiveSnapshotCaptureSDK = options.get("responsiveSnapshotCapture");
 
         return (responsiveSnapshotCaptureSDK != null && (boolean) responsiveSnapshotCaptureSDK) || responsiveSnapshotCaptureCLI;
