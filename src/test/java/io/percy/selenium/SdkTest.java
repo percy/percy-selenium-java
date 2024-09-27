@@ -134,6 +134,21 @@ import java.net.URL;
     assertEquals(data.get("screenshots").getClass().isAssignableFrom(JSONArray.class), true);
   }
 
+    @Test
+    public void snapshotWithResponsiveSnapshotCapture() {
+      // To run via test via chrome CDP uncomment below lines and replace chromedriver path
+//      System.setProperty("webdriver.chrome.driver", "<chromedriver_path>");
+//      ChromeOptions chromeOptions = new ChromeOptions();
+//      chromeOptions.addArguments("--remote-allow-origins=*");
+//      driver = new ChromeDriver(chromeOptions);
+
+      driver.get("https://www.webfx.com/tools/whats-my-browser-size/");
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("widths", Arrays.asList(768, 992, 1200));
+      options.put("responsiveSnapshotCapture", true);
+      percy.snapshot("Site with snapshotWithResponsiveSnapshotCapture", options);
+    }
+
   @Test
   public void takeScreenshot() {
     RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
