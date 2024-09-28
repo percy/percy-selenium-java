@@ -180,6 +180,7 @@ public class Percy {
         }
 
         boolean responsiveSnapshotCaptureCLI = false;
+        if (eligibleWidths == null) { return false; }
         if (CLIconfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
             responsiveSnapshotCaptureCLI = CLIconfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
         }
@@ -192,7 +193,7 @@ public class Percy {
         if (!isPercyEnabled) { return null; }
         if ("automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://www.browserstack.com/docs/percy/integrate/functional-and-visual"); }
 
-        List<Map<String, Object>> domSnapshot = new ArrayList<>();
+        Object domSnapshot = null;
 
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
@@ -206,7 +207,7 @@ public class Percy {
             if (isCaptureResponsiveDOM(options)) {
                 domSnapshot = captureResponsiveDom(driver, cookies, options);
             } else {
-                domSnapshot.add(getSerializedDOM(jse, cookies, options));
+                domSnapshot = getSerializedDOM(jse, cookies, options);
             }
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
@@ -373,7 +374,7 @@ public class Percy {
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
     private JSONObject postSnapshot(
-      List<Map<String, Object>> domSnapshot,
+      Object domSnapshot,
       String name,
       String url,
       Map<String, Object> options
