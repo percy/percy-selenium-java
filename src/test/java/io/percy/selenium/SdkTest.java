@@ -157,15 +157,15 @@ import java.net.URL;
       when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
     } catch (Exception e) {
     }
-    percy = spy(new Percy(mockedDriver));
-    percy.sessionType = "automate";
+    Percy mockedPercy = spy(new Percy(mockedDriver));
+    mockedPercy.sessionType = "automate";
     when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
     when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
     DesiredCapabilities capabilities = new DesiredCapabilities();
     capabilities.setCapability("browserName", "Chrome");
     when(mockedDriver.getCapabilities()).thenReturn(capabilities);
-    percy.screenshot("Test");
-    verify(percy).request(eq("/percy/automateScreenshot"), any(), eq("Test"));
+    mockedPercy.screenshot("Test");
+    verify(mockedPercy).request(eq("/percy/automateScreenshot"), any(), eq("Test"));
   }
 
     @Test
@@ -176,8 +176,8 @@ import java.net.URL;
         when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
       } catch (Exception e) {
       }
-      percy = spy(new Percy(mockedDriver));
-      percy.sessionType = "automate";
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+      mockedPercy.sessionType = "automate";
       when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
       when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
       DesiredCapabilities capabilities = new DesiredCapabilities();
@@ -189,8 +189,8 @@ import java.net.URL;
       when(mockedElement.getId()).thenReturn("1234");
       when(mockedConsiderElement.getId()).thenReturn("5678");
       options.put("ignore_region_selenium_elements", Arrays.asList(mockedElement));
-      percy.screenshot("Test", options);
-      verify(percy).request(eq("/percy/automateScreenshot"), any() , eq("Test"));
+      mockedPercy.screenshot("Test", options);
+      verify(mockedPercy).request(eq("/percy/automateScreenshot"), any() , eq("Test"));
     }
 
     @Test
@@ -203,8 +203,8 @@ import java.net.URL;
     @Test
     public void takeScreenshotThrowErrorForWeb() {
       RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
-      percy = spy(new Percy(mockedDriver));
-      Throwable exception = assertThrows(RuntimeException.class, () -> percy.screenshot("Test"));
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+      Throwable exception = assertThrows(RuntimeException.class, () -> mockedPercy.screenshot("Test"));
       assertEquals("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://www.browserstack.com/docs/percy/integrate/overview", exception.getMessage());
     }
 }

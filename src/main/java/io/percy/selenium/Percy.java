@@ -147,7 +147,7 @@ public class Percy {
      * @param scope    A CSS selector to scope the screenshot to
      */
     public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope) {
-        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, scope);
+        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, scope, null);
     }
 
     public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope, @Nullable Boolean sync) {
