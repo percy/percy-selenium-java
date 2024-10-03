@@ -94,7 +94,7 @@ $ percy exec -- [java test command]
 
 The snapshot method arguments:
 
-`percy.snapshot(name, widths[], minHeight, enableJavaScript, percyCSS, scope)`
+`percy.snapshot(name, widths[], minHeight, enableJavaScript, percyCSS, scope, sync, responsiveSnapshotCapture)`
 
 - `name` (**required**) - The snapshot name; must be unique to each snapshot
 - Additional snapshot options (overrides any project options):
@@ -104,6 +104,8 @@ The snapshot method arguments:
   - `percyCSS` - Percy specific CSS only applied in Percy's rendering
     environment
   - `scope` - A CSS selector to scope the screenshot to
+  - `sync` - For getting syncronous results https://www.browserstack.com/docs/percy/advanced/sync-comparison-results
+  - `responsiveSnapshotCapture` - For capturing snapshot of responsive websites
 
 
 ## Upgrading
