@@ -52,7 +52,7 @@ public class Percy {
     // Type of session automate/web
     protected String sessionType = null;
     protected JSONObject eligibleWidths;
-    private JSONObject CLIconfig;
+    private JSONObject cliConfig;
 
     // Is the Percy server running or not
     private boolean isPercyEnabled = healthcheck();
@@ -82,7 +82,7 @@ public class Percy {
      *
      */
     public JSONObject snapshot(String name) {
-        return snapshot(name, null, null, false, null, null, null);
+        return snapshot(name, null, null, false, null, null, null, null);
     }
 
     /**
@@ -93,7 +93,7 @@ public class Percy {
      *               pixels.
      */
     public JSONObject snapshot(String name, List<Integer> widths) {
-        return snapshot(name, widths, null, false, null, null, null);
+        return snapshot(name, widths, null, false, null, null, null, null);
     }
 
     /**
@@ -105,7 +105,7 @@ public class Percy {
      * @param minHeight The minimum height of the resulting snapshot. In pixels.
      */
     public JSONObject snapshot(String name, List<Integer> widths, Integer minHeight) {
-        return snapshot(name, widths, minHeight, false, null, null, null);
+        return snapshot(name, widths, minHeight, false, null, null, null, null);
     }
 
     /**
@@ -118,7 +118,7 @@ public class Percy {
      * @param enableJavaScript Enable JavaScript in the Percy rendering environment
      */
     public JSONObject snapshot(String name, List<Integer> widths, Integer minHeight, boolean enableJavaScript) {
-        return snapshot(name, widths, minHeight, enableJavaScript, null, null, null);
+        return snapshot(name, widths, minHeight, enableJavaScript, null, null, null, null);
     }
 
     /**
@@ -132,7 +132,7 @@ public class Percy {
      * @param percyCSS Percy specific CSS that is only applied in Percy's browsers
      */
     public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS) {
-        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, null, null);
+        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, null, null, null);
     }
 
     /**
@@ -147,7 +147,7 @@ public class Percy {
      * @param scope    A CSS selector to scope the screenshot to
      */
     public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope) {
-        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, scope, null);
+        return snapshot(name, widths, minHeight, enableJavaScript, percyCSS, scope, null, null);
     }
 
     public JSONObject snapshot(String name, @Nullable List<Integer> widths, Integer minHeight, boolean enableJavaScript, String percyCSS, String scope, @Nullable Boolean sync) {
@@ -171,8 +171,8 @@ public class Percy {
     }
 
     private boolean isCaptureResponsiveDOM(Map<String, Object> options) {
-        if (CLIconfig.has("percy") && !CLIconfig.isNull("percy")) {
-            JSONObject percyProperty = CLIconfig.getJSONObject("percy");
+        if (cliConfig.has("percy") && !cliConfig.isNull("percy")) {
+            JSONObject percyProperty = cliConfig.getJSONObject("percy");
 
             if (percyProperty.has("deferUploads") && !percyProperty.isNull("deferUploads") && percyProperty.getBoolean("deferUploads")) {
                 return false;
@@ -181,8 +181,8 @@ public class Percy {
 
         boolean responsiveSnapshotCaptureCLI = false;
         if (eligibleWidths == null) { return false; }
-        if (CLIconfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
-            responsiveSnapshotCaptureCLI = CLIconfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
+        if (cliConfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
+            responsiveSnapshotCaptureCLI = cliConfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
         }
         Object responsiveSnapshotCaptureSDK = options.get("responsiveSnapshotCapture");
 
@@ -319,7 +319,7 @@ public class Percy {
             JSONObject responseObject = new JSONObject(responseString);
             sessionType = (String) responseObject.optString("type", null);
             eligibleWidths = responseObject.optJSONObject("widths");
-            CLIconfig = responseObject.optJSONObject("config");
+            cliConfig = responseObject.optJSONObject("config");
 
             return true;
         } catch (Exception ex) {
