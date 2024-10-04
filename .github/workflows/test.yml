@@ -55,3 +55,5 @@ jobs:
       - run: MOZ_HEADLESS=1 npx percy exec -- mvn test
         env:
           PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
+          PERCY_PULL_REQUEST: ${{ github.event.number }}
+
