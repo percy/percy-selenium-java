@@ -28,6 +28,9 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.util.stream.Collectors;
 
+import javax.swing.text.html.CSS;
+import javax.xml.xpath.XPath;
+
 /**
  * Percy client for visual testing.
  */
@@ -73,6 +76,79 @@ public class Percy {
     public Percy(WebDriver driver) {
         this.driver = driver;
         this.env = new Environment(driver);
+    }
+
+    /**
+     * Creates a region configuration based on the provided parameters.
+     *
+     * @param boundingBox         The bounding box of the region, or null.
+     * @param elementXpath        The XPath of the element, or null.
+     * @param elementCSS          The CSS selector of the element, or null.
+     * @param padding             The padding around the region, or null.
+     * @param algorithm           The algorithm to be used (default 'ignore').
+     * @param diffSensitivity     The sensitivity for diffing, or null.
+     * @param imageIgnoreThreshold The image ignore threshold, or null.
+     * @param carouselsEnabled    Flag for enabling carousels, or null.
+     * @param bannersEnabled      Flag for enabling banners, or null.
+     * @param adsEnabled          Flag for enabling ads, or null.
+     * @param diffIgnoreThreshold The diff ignore threshold, or null.
+     * @return A map representing the region configuration.
+     */
+
+     public Map<String, Object> createRegion(Map<String, Object> params) {
+        Map<String, Object> elementSelector = new HashMap<>();
+        if (params.containsKey("boundingBox")) {
+            elementSelector.put("boundingBox", params.get("boundingBox"));
+        }
+        if (params.containsKey("elementXpath")) {
+            elementSelector.put("elementXpath", params.get("elementXpath"));
+        }
+        if (params.containsKey("elementCSS")) {
+            elementSelector.put("elementCSS", params.get("elementCSS"));
+        }
+
+        Map<String, Object> region = new HashMap<>();
+        region.put("algorithm", params.getOrDefault("algorithm", "ignore"));
+        region.put("elementSelector", elementSelector);
+
+        if (params.containsKey("padding")) {
+            region.put("padding", params.get("padding"));
+        }
+
+        Map<String, Object> configuration = new HashMap<>();
+        String algorithm = (String) params.getOrDefault("algorithm", "ignore");
+        if (algorithm.equals("standard") || algorithm.equals("intelliignore")) {
+            if (params.containsKey("diffSensitivity")) {
+                configuration.put("diffSensitivity", params.get("diffSensitivity"));
+            }
+            if (params.containsKey("imageIgnoreThreshold")) {
+                configuration.put("imageIgnoreThreshold", params.get("imageIgnoreThreshold"));
+            }
+            if (params.containsKey("carouselsEnabled")) {
+                configuration.put("carouselsEnabled", params.get("carouselsEnabled"));
+            }
+            if (params.containsKey("bannersEnabled")) {
+                configuration.put("bannersEnabled", params.get("bannersEnabled"));
+            }
+            if (params.containsKey("adsEnabled")) {
+                configuration.put("adsEnabled", params.get("adsEnabled"));
+            }
+        }
+
+        if (!configuration.isEmpty()) {
+            region.put("configuration", configuration);
+        }
+
+        Map<String, Object> assertion = new HashMap<>();
+        if (params.containsKey("diffIgnoreThreshold")) {
+            assertion.put("diffIgnoreThreshold", params.get("diffIgnoreThreshold"));
+        }
+
+        if (!assertion.isEmpty()) {
+            region.put("assertion", assertion);
+        }
+
+        return region;
     }
 
     /**

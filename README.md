@@ -220,6 +220,68 @@ public class Example {
         - `bottom` (int): Bottom coordinate of the consider region.
         - `left` (int): Left coordinate of the consider region.
         - `right` (int): Right coordinate of the consider region.
+    - `regions` parameter that allows users to apply snapshot options to specific areas of the page. This parameter is an array where each object defines a custom region with configurations.
+      - Parameters:
+        - `elementSelector` (mandatory, only one of the following must be provided)
+            - `boundingBox` (object): Defines the coordinates and size of the region.
+              - `x` (number): X-coordinate of the region.
+              - `y` (number): Y-coordinate of the region.
+              - `width` (number): Width of the region.
+              - `height` (number): Height of the region.
+            - `elementXpath` (string): The XPath selector for the element.
+            - `elementCSS` (string): The CSS selector for the element.
+        - `padding` (optional)
+            - Specifies additional padding around the selected region.
+            - Properties:
+              - `top` (number): Padding from the top.
+              - `left` (number): Padding from the left.
+              - `right` (number): Padding from the right.
+              - `bottom` (number): Padding from the bottom.
+        - `algorithm` (mandatory)
+            - Specifies the snapshot comparison algorithm.
+            - Allowed values: `standard`, `layout`, `ignore`, `intelliignore`.
+        - `configuration` (required for `standard` and `intelliignore` algorithms, ignored otherwise)
+            - `diffSensitivity` (number): Sensitivity level for detecting differences.
+            - `imageIgnoreThreshold` (number): Threshold for ignoring minor image differences.
+            - `carouselsEnabled` (boolean): Whether to enable carousel detection.
+            - `bannersEnabled` (boolean): Whether to enable banner detection.
+            - `adsEnabled` (boolean): Whether to enable ad detection.
+         - `assertion` (optional)
+            - Defines assertions to apply to the region.
+            - `diffIgnoreThreshold` (number): The threshold for ignoring minor differences.
+### Example Usage for regions
+```
+        Map<String, Object> elementSelector = new HashMap<>();
+        elementSelector.put("elementCSS", ".ad-banner");
+
+        Map<String, Object> padding = new HashMap<>();
+        padding.put("top", 10);
+        padding.put("left", 20);
+        padding.put("right", 15);
+        padding.put("bottom", 10);
+
+        Map<String, Object> configuration = new HashMap<>();
+        configuration.put("diffSensitivity", 2);
+        configuration.put("imageIgnoreThreshold", 0.2);
+        configuration.put("carouselsEnabled", true);
+        configuration.put("bannersEnabled", true);
+        configuration.put("adsEnabled", true);
+
+        Map<String, Object> assertion = new HashMap<>();
+        assertion.put("diffIgnoreThreshold", 0.4);
+
+        Map<String, Object> obj1 = new HashMap<>();
+        obj1.put("elementSelector", elementSelector);
+        obj1.put("padding", padding);
+        obj1.put("algorithm", "intelliignore");
+        obj1.put("configuration", configuration);
+        obj1.put("assertion", assertion);
+
+        List<Map<String, Object>> regions = Collections.singletonList(obj1);
+
+        percy.snapshot("Homepage", regions); 
+
+```
 
 ### Creating Percy on automate build
 Note: Automate Percy Token starts with `auto` keyword. The command can be triggered using `exec` keyword.
