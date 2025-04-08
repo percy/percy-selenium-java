@@ -230,13 +230,6 @@ public class Example {
               - `height` (number): Height of the region.
             - `elementXpath` (string): The XPath selector for the element.
             - `elementCSS` (string): The CSS selector for the element.
-        - `padding` (optional)
-            - Specifies additional padding around the selected region.
-            - Properties:
-              - `top` (number): Padding from the top.
-              - `left` (number): Padding from the left.
-              - `right` (number): Padding from the right.
-              - `bottom` (number): Padding from the bottom.
         - `algorithm` (mandatory)
             - Specifies the snapshot comparison algorithm.
             - Allowed values: `standard`, `layout`, `ignore`, `intelliignore`.
@@ -254,12 +247,6 @@ public class Example {
         Map<String, Object> elementSelector = new HashMap<>();
         elementSelector.put("elementCSS", ".ad-banner");
 
-        Map<String, Object> padding = new HashMap<>();
-        padding.put("top", 10);
-        padding.put("left", 20);
-        padding.put("right", 15);
-        padding.put("bottom", 10);
-
         Map<String, Object> configuration = new HashMap<>();
         configuration.put("diffSensitivity", 2);
         configuration.put("imageIgnoreThreshold", 0.2);
@@ -272,7 +259,6 @@ public class Example {
 
         Map<String, Object> obj1 = new HashMap<>();
         obj1.put("elementSelector", elementSelector);
-        obj1.put("padding", padding);
         obj1.put("algorithm", "intelliignore");
         obj1.put("configuration", configuration);
         obj1.put("assertion", assertion);

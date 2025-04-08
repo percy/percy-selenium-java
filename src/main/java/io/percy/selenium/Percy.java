@@ -81,17 +81,20 @@ public class Percy {
     /**
      * Creates a region configuration based on the provided parameters.
      *
-     * @param boundingBox         The bounding box of the region, or null.
-     * @param elementXpath        The XPath of the element, or null.
-     * @param elementCSS          The CSS selector of the element, or null.
-     * @param padding             The padding around the region, or null.
-     * @param algorithm           The algorithm to be used (default 'ignore').
-     * @param diffSensitivity     The sensitivity for diffing, or null.
-     * @param imageIgnoreThreshold The image ignore threshold, or null.
-     * @param carouselsEnabled    Flag for enabling carousels, or null.
-     * @param bannersEnabled      Flag for enabling banners, or null.
-     * @param adsEnabled          Flag for enabling ads, or null.
-     * @param diffIgnoreThreshold The diff ignore threshold, or null.
+     * @param params A map containing the region configuration options. Expected keys:
+     *               <ul>
+     *                  <li>boundingBox - The bounding box of the region, or null.</li>
+     *                  <li>elementXpath - The XPath of the element, or null.</li>
+     *                  <li>elementCSS - The CSS selector of the element, or null.</li>
+     *                  <li>padding - The padding around the region, or null.</li>
+     *                  <li>algorithm - The algorithm to be used (default: 'ignore').</li>
+     *                  <li>diffSensitivity - The sensitivity for diffing, or null.</li>
+     *                  <li>imageIgnoreThreshold - The image ignore threshold, or null.</li>
+     *                  <li>carouselsEnabled - Flag for enabling carousels, or null.</li>
+     *                  <li>bannersEnabled - Flag for enabling banners, or null.</li>
+     *                  <li>adsEnabled - Flag for enabling ads, or null.</li>
+     *                  <li>diffIgnoreThreshold - The diff ignore threshold, or null.</li>
+     *               </ul>
      * @return A map representing the region configuration.
      */
 
