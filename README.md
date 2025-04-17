@@ -244,28 +244,23 @@ public class Example {
             - `diffIgnoreThreshold` (number): The threshold for ignoring minor differences.
 ### Example Usage for regions
 ```
-        Map<String, Object> elementSelector = new HashMap<>();
-        elementSelector.put("elementCSS", ".ad-banner");
+        Map<String, Object> params = new HashMap<>();
+        params.put("elementXpath", "//div[@id='test']");
+        params.put("algorithm", "standard");
+        params.put("diffSensitivity", 3);
+        params.put("imageIgnoreThreshold", 0.2);
+        params.put("carouselsEnabled", true);
+        params.put("bannersEnabled", false);
+        params.put("adsEnabled", true);
+        params.put("diffIgnoreThreshold", 0.1);
 
-        Map<String, Object> configuration = new HashMap<>();
-        configuration.put("diffSensitivity", 2);
-        configuration.put("imageIgnoreThreshold", 0.2);
-        configuration.put("carouselsEnabled", true);
-        configuration.put("bannersEnabled", true);
-        configuration.put("adsEnabled", true);
-
-        Map<String, Object> assertion = new HashMap<>();
-        assertion.put("diffIgnoreThreshold", 0.4);
-
-        Map<String, Object> obj1 = new HashMap<>();
-        obj1.put("elementSelector", elementSelector);
-        obj1.put("algorithm", "intelliignore");
-        obj1.put("configuration", configuration);
-        obj1.put("assertion", assertion);
-
+        // Call the method to create the region
+        Map<String, Object> regions2 = percy.createRegion(params);
         List<Map<String, Object>> regions = Collections.singletonList(obj1);
+        Map<String, Object> options = new HashMap<>();
+        options.put("regions", regions);
 
-        percy.snapshot("Homepage", regions); 
+        percy.snapshot("Homepage", options); 
 
 ```
 
