@@ -220,6 +220,49 @@ public class Example {
         - `bottom` (int): Bottom coordinate of the consider region.
         - `left` (int): Left coordinate of the consider region.
         - `right` (int): Right coordinate of the consider region.
+    - `regions` parameter that allows users to apply snapshot options to specific areas of the page. This parameter is an array where each object defines a custom region with configurations.
+      - Parameters:
+       - `elementSelector` (optional, only one of the following must be provided, if this is not provided then full page will be considered as region)
+            - `boundingBox` (object): Defines the coordinates and size of the region.
+              - `x` (number): X-coordinate of the region.
+              - `y` (number): Y-coordinate of the region.
+              - `width` (number): Width of the region.
+              - `height` (number): Height of the region.
+            - `elementXpath` (string): The XPath selector for the element.
+            - `elementCSS` (string): The CSS selector for the element.
+        - `algorithm` (mandatory)
+            - Specifies the snapshot comparison algorithm.
+            - Allowed values: `standard`, `layout`, `ignore`, `intelliignore`.
+        - `configuration` (required for `standard` and `intelliignore` algorithms, ignored otherwise)
+            - `diffSensitivity` (number): Sensitivity level for detecting differences.
+            - `imageIgnoreThreshold` (number): Threshold for ignoring minor image differences.
+            - `carouselsEnabled` (boolean): Whether to enable carousel detection.
+            - `bannersEnabled` (boolean): Whether to enable banner detection.
+            - `adsEnabled` (boolean): Whether to enable ad detection.
+         - `assertion` (optional)
+            - Defines assertions to apply to the region.
+            - `diffIgnoreThreshold` (number): The threshold for ignoring minor differences.
+### Example Usage for regions
+```
+        Map<String, Object> params = new HashMap<>();
+        params.put("elementXpath", "//div[@id='test']");
+        params.put("algorithm", "standard");
+        params.put("diffSensitivity", 3);
+        params.put("imageIgnoreThreshold", 0.2);
+        params.put("carouselsEnabled", true);
+        params.put("bannersEnabled", false);
+        params.put("adsEnabled", true);
+        params.put("diffIgnoreThreshold", 0.1);
+
+        // Call the method to create the region
+        Map<String, Object> regions2 = percy.createRegion(params);
+        List<Map<String, Object>> regions = Collections.singletonList(obj1);
+        Map<String, Object> options = new HashMap<>();
+        options.put("regions", regions);
+
+        percy.snapshot("Homepage", options); 
+
+```
 
 ### Creating Percy on automate build
 Note: Automate Percy Token starts with `auto` keyword. The command can be triggered using `exec` keyword.

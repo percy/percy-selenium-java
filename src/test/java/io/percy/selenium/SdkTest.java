@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -206,5 +207,51 @@ import java.net.URL;
       Percy mockedPercy = spy(new Percy(mockedDriver));
       Throwable exception = assertThrows(RuntimeException.class, () -> mockedPercy.screenshot("Test"));
       assertEquals("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://www.browserstack.com/docs/percy/integrate/overview", exception.getMessage());
+    }
+
+    @Test
+    public void createRegionTest() {
+        // Setup the parameters for the region
+        Map<String, Object> params = new HashMap<>();
+        params.put("boundingBox", "100,100,200,200");
+        params.put("elementXpath", "//div[@id='test']");
+        params.put("elementCSS", ".test-class");
+        params.put("padding", 10);
+        params.put("algorithm", "standard");
+        params.put("diffSensitivity", 0.5);
+        params.put("imageIgnoreThreshold", 0.2);
+        params.put("carouselsEnabled", true);
+        params.put("bannersEnabled", false);
+        params.put("adsEnabled", true);
+        params.put("diffIgnoreThreshold", 0.1);
+
+        // Call the method to create the region
+        Map<String, Object> region = percy.createRegion(params);
+
+        // Validate the returned region
+        assertNotNull(region);
+
+        // Check if elementSelector was added correctly
+        Map<String, Object> elementSelector = (Map<String, Object>) region.get("elementSelector");
+        assertNotNull(elementSelector);
+        assertEquals("100,100,200,200", elementSelector.get("boundingBox"));
+        assertEquals("//div[@id='test']", elementSelector.get("elementXpath"));
+        assertEquals(".test-class", elementSelector.get("elementCSS"));
+
+        // Validate algorithm and configuration
+        assertEquals("standard", region.get("algorithm"));
+
+        Map<String, Object> configuration = (Map<String, Object>) region.get("configuration");
+        assertNotNull(configuration);
+        assertEquals(0.5, configuration.get("diffSensitivity"));
+        assertEquals(0.2, configuration.get("imageIgnoreThreshold"));
+        assertTrue((Boolean) configuration.get("carouselsEnabled"));
+        assertFalse((Boolean) configuration.get("bannersEnabled"));
+        assertTrue((Boolean) configuration.get("adsEnabled"));
+
+        // Validate assertion
+        Map<String, Object> assertion = (Map<String, Object>) region.get("assertion");
+        assertNotNull(assertion);
+        assertEquals(0.1, assertion.get("diffIgnoreThreshold"));
     }
 }
