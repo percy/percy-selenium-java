@@ -121,20 +121,18 @@ public class Percy {
         Map<String, Object> configuration = new HashMap<>();
         String algorithm = (String) params.getOrDefault("algorithm", "ignore");
         if (algorithm.equals("standard") || algorithm.equals("intelliignore")) {
-            if (params.containsKey("diffSensitivity")) {
-                configuration.put("diffSensitivity", params.get("diffSensitivity"));
-            }
-            if (params.containsKey("imageIgnoreThreshold")) {
-                configuration.put("imageIgnoreThreshold", params.get("imageIgnoreThreshold"));
-            }
-            if (params.containsKey("carouselsEnabled")) {
-                configuration.put("carouselsEnabled", params.get("carouselsEnabled"));
-            }
-            if (params.containsKey("bannersEnabled")) {
-                configuration.put("bannersEnabled", params.get("bannersEnabled"));
-            }
-            if (params.containsKey("adsEnabled")) {
-                configuration.put("adsEnabled", params.get("adsEnabled"));
+            List<String> keys = Arrays.asList(
+                "diffSensitivity",
+                "imageIgnoreThreshold",
+                "carouselsEnabled",
+                "bannersEnabled",
+                "adsEnabled"
+            );
+        
+            for (String key : keys) {
+                if (params.containsKey(key)) {
+                    configuration.put(key, params.get(key));
+                }
             }
         }
 
