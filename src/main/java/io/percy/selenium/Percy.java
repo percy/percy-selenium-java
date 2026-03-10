@@ -49,6 +49,9 @@ public class Percy {
 
     private static String RESONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault("RESONSIVE_CAPTURE_SLEEP_TIME", "");
 
+    private static String PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase();
+    
+    private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false"));
     // for logging
     private static String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
 
@@ -595,10 +598,16 @@ public class Percy {
         }
 
         // Wait for window resize event using WebDriverWait
+        // Made changes to handle handles the temporary null state of resizeCountObj  during page reload 
         try {
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(1));
-            wait.until((ExpectedCondition<Boolean>) d ->
-                    (long) ((JavascriptExecutor) d).executeScript("return window.resizeCount") == resizeCount);
+            wait.until((ExpectedCondition<Boolean>) d -> {
+                Object resizeCountObj = ((JavascriptExecutor) d).executeScript("return window.resizeCount");
+                if (resizeCountObj == null) {
+                    return false;
+                }
+                return (long) resizeCountObj == resizeCount;
+            });
         } catch (WebDriverException e) {
             log("Timed out waiting for window resize event for width " + width, "debug");
         }
@@ -625,6 +634,13 @@ public class Percy {
                 resizeCount++;
                 changeWindowDimensionAndWait(driver, width, currentHeight, resizeCount);
                 lastWindowWidth = width;
+            }
+
+            if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
+                log("Reloading page for width: " + width, "debug");
+                driver.navigate().refresh();
+                jse.executeScript(fetchPercyDOM());
+                jse.executeScript("PercyDOM.waitForResize()");
             }
 
             try {
