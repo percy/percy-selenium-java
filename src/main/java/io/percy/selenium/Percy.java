@@ -250,6 +250,61 @@ public class Percy {
         return snapshot(name, options);
     }
 
+    private List<Map<String, Object>> getResponsiveWidths(List<Integer> widths) {
+        String queryParam = "";
+        if (widths != null && !widths.isEmpty()) {
+            String joined = widths.stream().map(String::valueOf).collect(Collectors.joining(","));
+            queryParam = "?widths=" + joined;
+        }
+
+        int timeout = 30000; // 30 seconds
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setSocketTimeout(timeout)
+                .setConnectTimeout(timeout)
+                .build();
+
+        try (CloseableHttpClient httpClient = HttpClients.custom().setDefaultRequestConfig(requestConfig).build()) {
+            HttpGet httpget = new HttpGet(PERCY_SERVER_ADDRESS + "/percy/widths-config" + queryParam);
+            HttpResponse response = httpClient.execute(httpget);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                EntityUtils.consume(response.getEntity());
+                log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+                throw new RuntimeException(
+                        "Failed to fetch widths-config (HTTP " + statusCode + ")");
+            }
+
+            String responseString = EntityUtils.toString(response.getEntity(), "UTF-8");
+            JSONObject json = new JSONObject(responseString);
+
+            if (!json.has("widths") || json.isNull("widths")) {
+                log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+                throw new RuntimeException(
+                        "Missing \"widths\" in widths-config response");
+            }
+
+            JSONArray widthsArray = json.getJSONArray("widths");
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (int i = 0; i < widthsArray.length(); i++) {
+                JSONObject entry = widthsArray.getJSONObject(i);
+                Map<String, Object> item = new HashMap<>();
+                item.put("width", entry.getInt("width"));
+                if (entry.has("height") && !entry.isNull("height")) {
+                    item.put("height", entry.getInt("height"));
+                }
+                result.add(item);
+            }
+            return result;
+        } catch (RuntimeException re) {
+            throw re;
+        } catch (Exception ex) {
+            log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+            log("Failed to fetch widths-config: " + ex.getMessage(), "debug");
+            throw new RuntimeException(
+                    "Failed to fetch widths-config: " + ex.getMessage(), ex);
+        }
+    }
     private boolean isCaptureResponsiveDOM(Map<String, Object> options) {
         if (cliConfig.has("percy") && !cliConfig.isNull("percy")) {
             JSONObject percyProperty = cliConfig.getJSONObject("percy");
@@ -523,6 +578,26 @@ public class Percy {
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
 
+        // If PercyDOM serialized any processed cross-origin iframe frames, expose
+        // them on the snapshot as `corsIframes` so @percy/core can stitch them.
+        try {
+            Object processedFrames = null;
+            if (domSnapshot.containsKey("processedFrames")) {
+                processedFrames = domSnapshot.get("processedFrames");
+            } else if (domSnapshot.containsKey("frames")) {
+                processedFrames = domSnapshot.get("frames");
+            }
+
+            if (processedFrames instanceof List<?>) {
+                List<?> pfList = (List<?>) processedFrames;
+                if (!pfList.isEmpty()) {
+                    mutableSnapshot.put("corsIframes", pfList);
+                }
+            }
+        } catch (Exception e) {
+            log("Failed to attach corsIframes to domSnapshot: " + e.getMessage(), "debug");
+        }
+
         return mutableSnapshot;
     }
 
@@ -615,52 +690,65 @@ public class Percy {
 
     // Capture responsive DOM for different widths
     public List<Map<String, Object>> captureResponsiveDom(WebDriver driver, Set<Cookie> cookies, Map<String, Object> options) {
-        List<Integer> widths = getWidthsForMultiDom(options);
-
+        List<Map<String, Object>> widths = getResponsiveWidths((List<Integer>) options.get("widths"));
         List<Map<String, Object>> domSnapshots = new ArrayList<>();
-
         Dimension windowSize = driver.manage().window().getSize();
         int currentWidth = windowSize.getWidth();
         int currentHeight = windowSize.getHeight();
+        log("Initial window size: " + currentWidth + "x" + currentHeight, "debug");
         int lastWindowWidth = currentWidth;
         int resizeCount = 0;
         JavascriptExecutor jse = (JavascriptExecutor) driver;
-
-        // Inject JS to count window resize events
         jse.executeScript("PercyDOM.waitForResize()");
+        int targetHeight = currentHeight;
 
-        for (int width : widths) {
+        if (PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
+            Integer minHeight = (Integer) options.get("minHeight");
+            if (minHeight == null && cliConfig != null && cliConfig.has("snapshot")) {
+                JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
+                if (snapshotConfig.has("minHeight")) {
+                    minHeight = snapshotConfig.getInt("minHeight");
+                }
+            }
+            if (minHeight != null) {
+                Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
+                if (result instanceof Number) {
+                    targetHeight = ((Number) result).intValue();
+                    log("Calculated target height: " + targetHeight, "debug");
+                }
+            }
+        }
+        for (Map<String, Object> widthMap : widths) {
+            int width = (int) widthMap.get("width");
             if (lastWindowWidth != width) {
                 resizeCount++;
-                changeWindowDimensionAndWait(driver, width, currentHeight, resizeCount);
+                changeWindowDimensionAndWait(driver, width, targetHeight, resizeCount);
                 lastWindowWidth = width;
             }
-
             if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
                 log("Reloading page for width: " + width, "debug");
                 driver.navigate().refresh();
                 jse.executeScript(fetchPercyDOM());
                 jse.executeScript("PercyDOM.waitForResize()");
+                resizeCount = 0; 
             }
-
             try {
-                int sleepTime = Integer.parseInt(RESONSIVE_CAPTURE_SLEEP_TIME);
-                Thread.sleep(sleepTime * 1000); // Sleep if needed
+                if (RESONSIVE_CAPTURE_SLEEP_TIME != null && !RESONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
+                    int sleepTime = Integer.parseInt(RESONSIVE_CAPTURE_SLEEP_TIME);
+                    Thread.sleep(sleepTime * 1000L);
+                }
             } catch (InterruptedException | NumberFormatException ignored) {
             }
             Map<String, Object> domSnapshot = getSerializedDOM(jse, cookies, options);
             domSnapshot.put("width", width);
             domSnapshots.add(domSnapshot);
         }
-
-        // Revert to the original window size
         changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
 
         return domSnapshots;
-    }
-
-    protected static void log(String message) {
-        log(message, "info");
+        }
+        protected static void log(String message) {
+            log(message, "info");
     }
 
     protected static void log(String message, String level) {
