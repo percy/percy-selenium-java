@@ -14,6 +14,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -573,31 +574,122 @@ public class Percy {
         return jsBuilder.toString();
     }
 
+    private boolean isUnsupportedIframeSrc(String src) {
+        return src == null || src.isEmpty() ||
+               src.equals("about:blank") ||
+               src.startsWith("javascript:") ||
+               src.startsWith("data:") ||
+               src.startsWith("vbscript:");
+    }
+
+    private String getOrigin(String url) {
+        try {
+            URI uri = new URI(url);
+            String scheme = uri.getScheme();
+            String authority = uri.getAuthority();
+            if (scheme == null || authority == null) return "";
+            return scheme + "://" + authority;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private Map<String, Object> processFrame(WebElement frameElement, Map<String, Object> options) {
+        // Read attributes while still in parent context — these calls will
+        // fail if made after switchTo().frame().
+        String frameUrl = frameElement.getAttribute("src");
+        if (frameUrl == null) frameUrl = "unknown-src";
+        final String finalFrameUrl = frameUrl;
+        log("processFrame: checking iframe src=\"" + finalFrameUrl + "\"", "debug");
+
+        String percyElementId = frameElement.getAttribute("data-percy-element-id");
+        log("processFrame: data-percy-element-id=\"" + percyElementId + "\" for src=\"" + finalFrameUrl + "\"", "debug");
+        if (percyElementId == null || percyElementId.isEmpty()) {
+            log("Skipping frame " + finalFrameUrl + ": no matching percyElementId found", "debug");
+            return null;
+        }
+
+        Map<String, Object> iframeSnapshot = null;
+        try {
+            driver.switchTo().frame(frameElement);
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            // Inject Percy DOM into the cross-origin frame context
+            jse.executeScript(domJs);
+            // Serialize inside the frame; enableJavaScript=true is required for CORS iframes
+            Map<String, Object> iframeOptions = new HashMap<>(options);
+            iframeOptions.put("enableJavaScript", true);
+            JSONObject optionsJson = new JSONObject(iframeOptions);
+            iframeSnapshot = (Map<String, Object>) jse.executeScript(
+                "return PercyDOM.serialize(" + optionsJson.toString() + ")"
+            );
+        } catch (Exception e) {
+            log("Failed to process cross-origin frame " + finalFrameUrl + ": " + e.getMessage(), "error");
+            throw new RuntimeException("Failed to process cross-origin frame " + finalFrameUrl, e);
+        } finally {
+            try {
+                driver.switchTo().defaultContent();
+            } catch (Exception err) {
+                throw new RuntimeException(
+                    "Fatal: could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable."
+                );
+            }
+        }
+
+        Map<String, Object> iframeData = new HashMap<>();
+        iframeData.put("percyElementId", percyElementId);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("iframeData", iframeData);
+        result.put("iframeSnapshot", iframeSnapshot);
+        result.put("frameUrl", finalFrameUrl);
+        return result;
+    }
+
     private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+        // 1. Serialize the main page first (this adds the data-percy-element-ids)
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
-
-        // If PercyDOM serialized any processed cross-origin iframe frames, expose
-        // them on the snapshot as `corsIframes` so @percy/core can stitch them.
+        
+        // 2. Process CORS IFrames
         try {
-            Object processedFrames = null;
-            if (domSnapshot.containsKey("processedFrames")) {
-                processedFrames = domSnapshot.get("processedFrames");
-            } else if (domSnapshot.containsKey("frames")) {
-                processedFrames = domSnapshot.get("frames");
-            }
-
-            if (processedFrames instanceof List<?>) {
-                List<?> pfList = (List<?>) processedFrames;
-                if (!pfList.isEmpty()) {
-                    mutableSnapshot.put("corsIframes", pfList);
+            String pageOrigin = getOrigin(driver.getCurrentUrl());
+            List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
+            if (!iframes.isEmpty() && !domJs.trim().isEmpty()) {
+                List<Map<String, Object>> processedFrames = new ArrayList<>();
+                for (WebElement frame : iframes) {
+                    String frameSrc = frame.getAttribute("src");
+                    if (isUnsupportedIframeSrc(frameSrc)) {
+                        continue;
+                    }
+                    String frameOrigin;
+                    try {
+                        URI base = new URI(driver.getCurrentUrl());
+                        URI resolved = base.resolve(frameSrc);
+                        frameOrigin = getOrigin(resolved.toString());
+                    } catch (Exception e) {
+                        log("Skipping iframe \"" + frameSrc + "\": " + e.getMessage(), "debug");
+                        continue;
+                    }
+                    if (frameOrigin.equals(pageOrigin)) {
+                        continue;
+                    }
+                    try {
+                        Map<String, Object> result = processFrame(frame, options);
+                        if (result != null) {
+                            processedFrames.add(result);
+                        }
+                    } catch (Exception e) {
+                        log("Skipping frame \"" + frameSrc + "\" due to error: " + e.getMessage(), "debug");
+                    }
+                }
+                if (!processedFrames.isEmpty()) {
+                    mutableSnapshot.put("corsIframes", processedFrames);
                 }
             }
         } catch (Exception e) {
-            log("Failed to attach corsIframes to domSnapshot: " + e.getMessage(), "debug");
+            log("Failed to process cross-origin iframes: " + e.getMessage(), "debug");
         }
-
         return mutableSnapshot;
     }
 
@@ -608,39 +700,6 @@ public class Percy {
                 ignoredElementsArray.add(elementId);
         }
         return ignoredElementsArray;
-    }
-
-    // Get widths for multi DOM
-    private List<Integer> getWidthsForMultiDom(Map<String, Object> options) {
-        List<Integer> widths;
-        if (options.containsKey("widths") && options.get("widths") instanceof List<?>) {
-            widths = (List<Integer>) options.get("widths");
-        } else {
-            widths = new ArrayList<>();
-        }
-        // Create a Set to avoid duplicates
-        Set<Integer> allWidths = new HashSet<>();
-
-        JSONArray mobileWidths = eligibleWidths.getJSONArray("mobile");
-        for (int i = 0; i < mobileWidths.length(); i++) {
-            allWidths.add(mobileWidths.getInt(i));
-        }
-
-        // Add input widths if provided
-        if (widths.size() != 0) {
-            for (int width : widths) {
-                allWidths.add(width);
-            }
-        } else {
-            // Add config widths if no input widths are provided
-            JSONArray configWidths = eligibleWidths.getJSONArray("config");
-            for (int i = 0; i < configWidths.length(); i++) {
-                allWidths.add(configWidths.getInt(i));
-            }
-        }
-
-        // Convert Set back to List
-        return allWidths.stream().collect(Collectors.toList());
     }
 
     // Method to check if ChromeDriver supports CDP by checking the existence of executeCdpCommand
