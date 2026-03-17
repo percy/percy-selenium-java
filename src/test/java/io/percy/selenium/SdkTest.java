@@ -1,9 +1,20 @@
 package io.percy.selenium;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
+import java.net.HttpURLConnection;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Set;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,17 +26,24 @@ import static org.junit.jupiter.api.Assertions.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.openqa.selenium.By;
+import org.openqa.selenium.Cookie;
+import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
+import org.openqa.selenium.WebDriver.TargetLocator;
 import org.openqa.selenium.firefox.FirefoxDriver;
 
 import io.github.bonigarcia.wdm.WebDriverManager;
 
 import org.openqa.selenium.remote.*;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.Mockito.*;
 import java.net.URL;
   public class SdkTest {
@@ -36,7 +54,7 @@ import java.net.URL;
   @BeforeAll
   public static void testSetup() throws IOException {
     // Disable browser logs from being logged to stdout
-    System.setProperty(FirefoxDriver.SystemProperty.BROWSER_LOGFILE,"/dev/null");
+    System.setProperty("webdriver.firefox.logfile","/dev/null");
 
     WebDriverManager.firefoxdriver().setup();
     TestServer.startServer();
@@ -125,11 +143,33 @@ import java.net.URL;
 
   @Test
   public void takeSnapshotWithSyncCLI(){
-    driver.get("https://example.com");
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    Percy mockedPercy = spy(new Percy(mockedDriver));
+
+    try {
+      setField(mockedPercy, "isPercyEnabled", true);
+      setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {}; window.PercyDOM.serialize = function(){ return {}; };");
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+    } catch (Exception e) {
+      fail("Failed to setup test state: " + e.getMessage());
+    }
+
+    when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+    WebDriver.Options mockedOptions = mock(WebDriver.Options.class);
+    when(mockedDriver.manage()).thenReturn(mockedOptions);
+    when(mockedOptions.getCookies()).thenReturn(Collections.emptySet());
+    when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenReturn(new HashMap<String, Object>());
+
+    JSONObject mockedResponse = new JSONObject();
+    mockedResponse.put("snapshot-name", "test_sync_cli_snapshot");
+    mockedResponse.put("status", "success");
+    mockedResponse.put("screenshots", new JSONArray());
+    doReturn(mockedResponse).when(mockedPercy).request(eq("/percy/snapshot"), any(JSONObject.class), eq("test_sync_cli_snapshot"));
+
     Map<String, Object> options = new HashMap<String, Object>();
     options.put("sync", true);
 
-    JSONObject data = percy.snapshot("test_sync_cli_snapshot", options);
+    JSONObject data = mockedPercy.snapshot("test_sync_cli_snapshot", options);
     assertEquals(data.getString("snapshot-name"), "test_sync_cli_snapshot");
     assertEquals(data.getString("status"), "success");
     assertEquals(data.get("screenshots").getClass().isAssignableFrom(JSONArray.class), true);
@@ -159,6 +199,11 @@ import java.net.URL;
     } catch (Exception e) {
     }
     Percy mockedPercy = spy(new Percy(mockedDriver));
+    try {
+      setField(mockedPercy, "isPercyEnabled", true);
+    } catch (Exception e) {
+      fail("Failed to setup test state: " + e.getMessage());
+    }
     mockedPercy.sessionType = "automate";
     when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
     when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
@@ -178,6 +223,11 @@ import java.net.URL;
       } catch (Exception e) {
       }
       Percy mockedPercy = spy(new Percy(mockedDriver));
+      try {
+        setField(mockedPercy, "isPercyEnabled", true);
+      } catch (Exception e) {
+        fail("Failed to setup test state: " + e.getMessage());
+      }
       mockedPercy.sessionType = "automate";
       when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
       when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
@@ -196,8 +246,15 @@ import java.net.URL;
 
     @Test
     public void takeSnapshotThrowErrorForPOA() {
-      percy.sessionType = "automate";
-      Throwable exception = assertThrows(RuntimeException.class, () -> percy.snapshot("Test"));
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+      mockedPercy.sessionType = "automate";
+      try {
+        setField(mockedPercy, "isPercyEnabled", true);
+      } catch (Exception e) {
+        fail("Failed to setup test state: " + e.getMessage());
+      }
+      Throwable exception = assertThrows(RuntimeException.class, () -> mockedPercy.snapshot("Test"));
       assertEquals("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://www.browserstack.com/docs/percy/integrate/functional-and-visual", exception.getMessage());
     }
 
@@ -205,8 +262,383 @@ import java.net.URL;
     public void takeScreenshotThrowErrorForWeb() {
       RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
       Percy mockedPercy = spy(new Percy(mockedDriver));
+      try {
+        setField(mockedPercy, "isPercyEnabled", true);
+      } catch (Exception e) {
+        fail("Failed to setup test state: " + e.getMessage());
+      }
       Throwable exception = assertThrows(RuntimeException.class, () -> mockedPercy.screenshot("Test"));
       assertEquals("Invalid function call - screenshot(). Please use snapshot() function for taking screenshot. screenshot() should be used only while using Percy with Automate. For more information on usage of snapshot(), refer doc for your language https://www.browserstack.com/docs/percy/integrate/overview", exception.getMessage());
+    }
+
+    @Test
+    public void responsiveSnapshotCaptureUsesSdkOptionWhenEligible() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "eligibleWidths", new JSONObject().put("default", 1280));
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject().put("responsiveSnapshotCapture", false)));
+
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("responsiveSnapshotCapture", true);
+
+      boolean result = (boolean) invokePrivate(mockedPercy, "isCaptureResponsiveDOM", new Class[]{Map.class}, options);
+
+      assertTrue(result);
+    }
+
+    @Test
+    public void responsiveSnapshotCaptureDisabledForDeferUploads() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "eligibleWidths", new JSONObject().put("default", 1280));
+      setField(
+        mockedPercy,
+        "cliConfig",
+        new JSONObject()
+          .put("percy", new JSONObject().put("deferUploads", true))
+          .put("snapshot", new JSONObject().put("responsiveSnapshotCapture", true))
+      );
+
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("responsiveSnapshotCapture", true);
+
+      boolean result = (boolean) invokePrivate(mockedPercy, "isCaptureResponsiveDOM", new Class[]{Map.class}, options);
+
+      assertFalse(result);
+    }
+
+    @Test
+    public void getResponsiveWidthsParsesQueryAndResponse() throws Exception {
+      AtomicReference<String> queryRef = new AtomicReference<String>(null);
+      HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+      server.createContext("/percy/widths-config", new HttpHandler() {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+          queryRef.set(exchange.getRequestURI().getQuery());
+          byte[] body = "{\"widths\":[{\"width\":375},{\"width\":1280,\"height\":900}]}".getBytes("UTF-8");
+          exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+          }
+        }
+      });
+      server.start();
+
+      String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+      try {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> widths = (List<Map<String, Object>>) invokePrivate(
+          mockedPercy,
+          "getResponsiveWidths",
+          new Class[]{List.class},
+          Arrays.asList(375, 1280)
+        );
+
+        assertEquals("widths=375,1280", queryRef.get());
+        assertEquals(2, widths.size());
+        assertEquals(375, widths.get(0).get("width"));
+        assertEquals(1280, widths.get(1).get("width"));
+        assertEquals(900, widths.get(1).get("height"));
+      } finally {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+        server.stop(0);
+      }
+    }
+
+    @Test
+    public void capturesCrossOriginIframeDataInSerializedDom() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+      WebElement iframe = mock(WebElement.class);
+      when(iframe.getAttribute("src")).thenReturn("https://cdn.other.com/frame");
+      when(iframe.getAttribute("data-percy-element-id")).thenReturn("frame-123");
+
+      when(mockedDriver.getCurrentUrl()).thenReturn("https://app.example.com/page");
+      when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.singletonList(iframe));
+
+      TargetLocator targetLocator = mock(TargetLocator.class);
+      when(mockedDriver.switchTo()).thenReturn(targetLocator);
+      when(targetLocator.frame(iframe)).thenReturn(mockedDriver);
+      when(targetLocator.defaultContent()).thenReturn(mockedDriver);
+
+      Map<String, Object> mainSnapshot = new HashMap<String, Object>();
+      mainSnapshot.put("dom", "main");
+      Map<String, Object> iframeSnapshot = new HashMap<String, Object>();
+      iframeSnapshot.put("dom", "iframe");
+
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+        String script = invocation.getArgument(0);
+        if (script.startsWith("return PercyDOM.serialize(")) {
+          if (script.contains("\"enableJavaScript\":true")) {
+            return iframeSnapshot;
+          }
+          return mainSnapshot;
+        }
+        return null;
+      });
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> serialized = (Map<String, Object>) invokePrivate(
+        mockedPercy,
+        "getSerializedDOM",
+        new Class[]{JavascriptExecutor.class, Set.class, Map.class},
+        mockedDriver,
+        new HashSet<Cookie>(),
+        new HashMap<String, Object>()
+      );
+
+      assertTrue(serialized.containsKey("cookies"));
+      assertTrue(serialized.containsKey("corsIframes"));
+
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> corsIframes = (List<Map<String, Object>>) serialized.get("corsIframes");
+      assertEquals(1, corsIframes.size());
+
+      Map<String, Object> frameData = corsIframes.get(0);
+      assertEquals("https://cdn.other.com/frame", frameData.get("frameUrl"));
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> iframeData = (Map<String, Object>) frameData.get("iframeData");
+      assertEquals("frame-123", iframeData.get("percyElementId"));
+      assertEquals("iframe", ((Map<?, ?>) frameData.get("iframeSnapshot")).get("dom"));
+    }
+
+    @Test
+    public void getResponsiveWidthsThrowsForNon200Response() throws Exception {
+      HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+      server.createContext("/percy/widths-config", new HttpHandler() {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+          byte[] body = "{}".getBytes("UTF-8");
+          exchange.sendResponseHeaders(HttpURLConnection.HTTP_INTERNAL_ERROR, body.length);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+          }
+        }
+      });
+      server.start();
+
+      String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+      try {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+
+        InvocationTargetException exception = assertThrows(
+          InvocationTargetException.class,
+          () -> invokePrivate(mockedPercy, "getResponsiveWidths", new Class[]{List.class}, Arrays.asList(375, 1280))
+        );
+        assertNotNull(exception.getCause());
+        assertTrue(exception.getCause() instanceof RuntimeException);
+        assertTrue(exception.getCause().getMessage().contains("Failed to fetch widths-config (HTTP 500)"));
+      } finally {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+        server.stop(0);
+      }
+    }
+
+    @Test
+    public void getResponsiveWidthsThrowsWhenWidthsKeyMissing() throws Exception {
+      HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+      server.createContext("/percy/widths-config", new HttpHandler() {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+          byte[] body = "{}".getBytes("UTF-8");
+          exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+          }
+        }
+      });
+      server.start();
+
+      String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+      try {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+
+        InvocationTargetException exception = assertThrows(
+          InvocationTargetException.class,
+          () -> invokePrivate(mockedPercy, "getResponsiveWidths", new Class[]{List.class}, Arrays.asList(375, 1280))
+        );
+        assertNotNull(exception.getCause());
+        assertTrue(exception.getCause() instanceof RuntimeException);
+        assertTrue(exception.getCause().getMessage().contains("Missing \"widths\" in widths-config response"));
+      } finally {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+        server.stop(0);
+      }
+    }
+
+    @Test
+    public void responsiveSnapshotCaptureIsFalseWhenEligibleWidthsMissing() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "eligibleWidths", null);
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject().put("responsiveSnapshotCapture", true)));
+
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("responsiveSnapshotCapture", true);
+
+      boolean result = (boolean) invokePrivate(mockedPercy, "isCaptureResponsiveDOM", new Class[]{Map.class}, options);
+      assertFalse(result);
+    }
+
+    @Test
+    public void skipsUnsupportedIframeSrcInSerializedDom() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+      WebElement iframe = mock(WebElement.class);
+      when(iframe.getAttribute("src")).thenReturn("about:blank");
+
+      when(mockedDriver.getCurrentUrl()).thenReturn("https://app.example.com/page");
+      when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.singletonList(iframe));
+
+      Map<String, Object> mainSnapshot = new HashMap<String, Object>();
+      mainSnapshot.put("dom", "main");
+
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenReturn(mainSnapshot);
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> serialized = (Map<String, Object>) invokePrivate(
+        mockedPercy,
+        "getSerializedDOM",
+        new Class[]{JavascriptExecutor.class, Set.class, Map.class},
+        mockedDriver,
+        new HashSet<Cookie>(),
+        new HashMap<String, Object>()
+      );
+
+      assertFalse(serialized.containsKey("corsIframes"));
+    }
+
+    @Test
+    public void skipsSameOriginIframeInSerializedDom() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+      WebElement iframe = mock(WebElement.class);
+      when(iframe.getAttribute("src")).thenReturn("https://app.example.com/frame");
+
+      when(mockedDriver.getCurrentUrl()).thenReturn("https://app.example.com/page");
+      when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.singletonList(iframe));
+
+      Map<String, Object> mainSnapshot = new HashMap<String, Object>();
+      mainSnapshot.put("dom", "main");
+
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenReturn(mainSnapshot);
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> serialized = (Map<String, Object>) invokePrivate(
+        mockedPercy,
+        "getSerializedDOM",
+        new Class[]{JavascriptExecutor.class, Set.class, Map.class},
+        mockedDriver,
+        new HashSet<Cookie>(),
+        new HashMap<String, Object>()
+      );
+
+      assertFalse(serialized.containsKey("corsIframes"));
+    }
+
+    @Test
+    public void processFrameReturnsNullWhenPercyElementIdMissing() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      WebElement iframe = mock(WebElement.class);
+      when(iframe.getAttribute("src")).thenReturn("https://cdn.other.com/frame");
+      when(iframe.getAttribute("data-percy-element-id")).thenReturn(null);
+
+      Object result = invokePrivate(mockedPercy, "processFrame", new Class[]{WebElement.class, Map.class}, iframe, new HashMap<String, Object>());
+      assertNull(result);
+      verify(mockedDriver, never()).switchTo();
+    }
+
+    @Test
+    public void takeScreenshotWithCamelCaseAliasOptions() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      HttpCommandExecutor commandExecutor = mock(HttpCommandExecutor.class);
+      when(commandExecutor.getAddressOfRemoteServer()).thenReturn(new URL("https://hub-cloud.browserstack.com/wd/hub"));
+
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+      setField(mockedPercy, "isPercyEnabled", true);
+      mockedPercy.sessionType = "automate";
+
+      when(mockedDriver.getSessionId()).thenReturn(new SessionId("123"));
+      when(mockedDriver.getCommandExecutor()).thenReturn(commandExecutor);
+      DesiredCapabilities capabilities = new DesiredCapabilities();
+      capabilities.setCapability("browserName", "Chrome");
+      when(mockedDriver.getCapabilities()).thenReturn(capabilities);
+
+      RemoteWebElement mockedIgnoreElement = mock(RemoteWebElement.class);
+      RemoteWebElement mockedConsiderElement = mock(RemoteWebElement.class);
+      when(mockedIgnoreElement.getId()).thenReturn("ignore-123");
+      when(mockedConsiderElement.getId()).thenReturn("consider-456");
+
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("ignoreRegionSeleniumElements", Arrays.asList(mockedIgnoreElement));
+      options.put("considerRegionSeleniumElements", Arrays.asList(mockedConsiderElement));
+
+      mockedPercy.screenshot("Test", options);
+
+      ArgumentCaptor<JSONObject> requestBodyCaptor = ArgumentCaptor.forClass(JSONObject.class);
+      verify(mockedPercy).request(eq("/percy/automateScreenshot"), requestBodyCaptor.capture(), eq("Test"));
+
+      JSONObject requestBody = requestBodyCaptor.getValue();
+      JSONObject capturedOptions = requestBody.getJSONObject("options");
+      JSONArray ignoreElements = capturedOptions.getJSONArray("ignore_region_elements");
+      JSONArray considerElements = capturedOptions.getJSONArray("consider_region_elements");
+
+      assertEquals("ignore-123", ignoreElements.getString(0));
+      assertEquals("consider-456", considerElements.getString(0));
+      assertFalse(capturedOptions.has("ignoreRegionSeleniumElements"));
+      assertFalse(capturedOptions.has("considerRegionSeleniumElements"));
+    }
+
+    @Test
+    public void createRegionWithIntelliignoreIncludesConfiguration() {
+      Map<String, Object> params = new HashMap<String, Object>();
+      params.put("algorithm", "intelliignore");
+      params.put("diffSensitivity", 0.3);
+      params.put("carouselsEnabled", true);
+
+      Map<String, Object> region = percy.createRegion(params);
+
+      assertEquals("intelliignore", region.get("algorithm"));
+      @SuppressWarnings("unchecked")
+      Map<String, Object> configuration = (Map<String, Object>) region.get("configuration");
+      assertNotNull(configuration);
+      assertEquals(0.3, configuration.get("diffSensitivity"));
+      assertTrue((Boolean) configuration.get("carouselsEnabled"));
+    }
+
+    @Test
+    public void createRegionWithIgnoreAlgorithmOmitsConfiguration() {
+      Map<String, Object> params = new HashMap<String, Object>();
+      params.put("algorithm", "ignore");
+      params.put("diffSensitivity", 0.3);
+
+      Map<String, Object> region = percy.createRegion(params);
+
+      assertEquals("ignore", region.get("algorithm"));
+      assertFalse(region.containsKey("configuration"));
     }
 
     @Test
@@ -253,5 +685,30 @@ import java.net.URL;
         Map<String, Object> assertion = (Map<String, Object>) region.get("assertion");
         assertNotNull(assertion);
         assertEquals(0.1, assertion.get("diffIgnoreThreshold"));
+    }
+
+    private static Object invokePrivate(Object target, String methodName, Class<?>[] paramTypes, Object... args)
+        throws Exception {
+      Method method = Percy.class.getDeclaredMethod(methodName, paramTypes);
+      method.setAccessible(true);
+      return method.invoke(target, args);
+    }
+
+    private static void setField(Object target, String fieldName, Object value) throws Exception {
+      Field field = Percy.class.getDeclaredField(fieldName);
+      field.setAccessible(true);
+      field.set(target, value);
+    }
+
+    private static void setStaticField(Class<?> clazz, String fieldName, Object value) throws Exception {
+      Field field = clazz.getDeclaredField(fieldName);
+      field.setAccessible(true);
+      field.set(null, value);
+    }
+
+    private static String getStaticStringField(Class<?> clazz, String fieldName) throws Exception {
+      Field field = clazz.getDeclaredField(fieldName);
+      field.setAccessible(true);
+      return (String) field.get(null);
     }
 }

@@ -48,7 +48,7 @@ public class Percy {
     // Determine if we're debug logging
     private static boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
 
-    private static String RESONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault("RESONSIVE_CAPTURE_SLEEP_TIME", "");
+    private static String RESPONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault("RESPONSIVE_CAPTURE_SLEEP_TIME", "");
 
     private static String PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase();
     
@@ -740,7 +740,7 @@ public class Percy {
                 if (resizeCountObj == null) {
                     return false;
                 }
-                return (long) resizeCountObj == resizeCount;
+                return (resizeCountObj instanceof Number) && ((Number) resizeCountObj).longValue() == resizeCount;
             });
         } catch (WebDriverException e) {
             log("Timed out waiting for window resize event for width " + width, "debug");
@@ -762,26 +762,43 @@ public class Percy {
         int targetHeight = currentHeight;
 
         if (PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
-            Integer minHeight = (Integer) options.get("minHeight");
-            if (minHeight == null && cliConfig != null && cliConfig.has("snapshot")) {
+            Object minHeightObj = options.get("minHeight");
+            if (minHeightObj == null && cliConfig != null && cliConfig.has("snapshot")) {
                 JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
                 if (snapshotConfig.has("minHeight")) {
-                    minHeight = snapshotConfig.getInt("minHeight");
-                }
+                    minHeightObj = snapshotConfig.getInt("minHeight");
+                    }
             }
-            if (minHeight != null) {
-                Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
-                if (result instanceof Number) {
-                    targetHeight = ((Number) result).intValue();
-                    log("Calculated target height: " + targetHeight, "debug");
+            if (minHeightObj != null) {
+                try {
+                    int minHeight = Integer.parseInt(minHeightObj.toString());
+                    Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
+                    if (result instanceof Number) {
+                        targetHeight = ((Number) result).intValue();
+                        log("Calculated height for responsive capture using minHeight: " + targetHeight, "debug");
+                    }
+                } catch (NumberFormatException e) {
+                    log("Invalid minHeight value " + minHeightObj + "; expected integer, using current window height instead.", "debug");
                 }
+            } else {
+                log("minHeight not found in options or cliConfig, using current window height: " + targetHeight, "debug");
             }
+        } else {
+            log("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is disabled, using current window height: " + targetHeight, "debug");
         }
         for (Map<String, Object> widthMap : widths) {
-            int width = (int) widthMap.get("width");
+            Object widthObj = widthMap.get("width");
+            if (!(widthObj instanceof Number)) {
+                continue;
+            }
+            int width = ((Number) widthObj).intValue();
+            Object heightObj = widthMap.get("height");
+            log("Width entry: width=" + width + ", height from widths config=" + heightObj + ", targetHeight=" + targetHeight, "debug");
+            int heightForWidth = (heightObj instanceof Number)? ((Number) heightObj).intValue(): targetHeight;
             if (lastWindowWidth != width) {
                 resizeCount++;
-                changeWindowDimensionAndWait(driver, width, targetHeight, resizeCount);
+                log("Resizing window to width=" + width + ", height=" + heightForWidth, "debug");
+                changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
                 lastWindowWidth = width;
             }
             if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
@@ -792,8 +809,8 @@ public class Percy {
                 resizeCount = 0; 
             }
             try {
-                if (RESONSIVE_CAPTURE_SLEEP_TIME != null && !RESONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
-                    int sleepTime = Integer.parseInt(RESONSIVE_CAPTURE_SLEEP_TIME);
+                if (RESPONSIVE_CAPTURE_SLEEP_TIME != null && !RESPONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
+                    int sleepTime = Integer.parseInt(RESPONSIVE_CAPTURE_SLEEP_TIME);
                     Thread.sleep(sleepTime * 1000L);
                 }
             } catch (InterruptedException | NumberFormatException ignored) {
