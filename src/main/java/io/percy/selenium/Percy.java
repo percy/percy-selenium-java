@@ -53,6 +53,7 @@ public class Percy {
     private static String PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase();
     
     private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false"));
+    private static final int WIDTHS_CONFIG_TIMEOUT_MS = 30000;
     // for logging
     private static String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
 
@@ -252,51 +253,12 @@ public class Percy {
     }
 
     private List<Map<String, Object>> getResponsiveWidths(List<Integer> widths) {
-        String queryParam = "";
-        if (widths != null && !widths.isEmpty()) {
-            String joined = widths.stream().map(String::valueOf).collect(Collectors.joining(","));
-            queryParam = "?widths=" + joined;
-        }
-
-        int timeout = 30000; // 30 seconds
-        RequestConfig requestConfig = RequestConfig.custom()
-                .setSocketTimeout(timeout)
-                .setConnectTimeout(timeout)
-                .build();
+        String queryParam = buildWidthsQueryParam(widths);
+        RequestConfig requestConfig = buildRequestConfig(WIDTHS_CONFIG_TIMEOUT_MS);
 
         try (CloseableHttpClient httpClient = HttpClients.custom().setDefaultRequestConfig(requestConfig).build()) {
-            HttpGet httpget = new HttpGet(PERCY_SERVER_ADDRESS + "/percy/widths-config" + queryParam);
-            HttpResponse response = httpClient.execute(httpget);
-            int statusCode = response.getStatusLine().getStatusCode();
-
-            if (statusCode != 200) {
-                EntityUtils.consume(response.getEntity());
-                log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
-                throw new RuntimeException(
-                        "Failed to fetch widths-config (HTTP " + statusCode + ")");
-            }
-
-            String responseString = EntityUtils.toString(response.getEntity(), "UTF-8");
-            JSONObject json = new JSONObject(responseString);
-
-            if (!json.has("widths") || json.isNull("widths")) {
-                log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
-                throw new RuntimeException(
-                        "Missing \"widths\" in widths-config response");
-            }
-
-            JSONArray widthsArray = json.getJSONArray("widths");
-            List<Map<String, Object>> result = new ArrayList<>();
-            for (int i = 0; i < widthsArray.length(); i++) {
-                JSONObject entry = widthsArray.getJSONObject(i);
-                Map<String, Object> item = new HashMap<>();
-                item.put("width", entry.getInt("width"));
-                if (entry.has("height") && !entry.isNull("height")) {
-                    item.put("height", entry.getInt("height"));
-                }
-                result.add(item);
-            }
-            return result;
+            HttpResponse response = fetchWidthsConfigResponse(httpClient, queryParam);
+            return parseWidthsConfigResponse(response);
         } catch (RuntimeException re) {
             throw re;
         } catch (Exception ex) {
@@ -306,6 +268,63 @@ public class Percy {
                     "Failed to fetch widths-config: " + ex.getMessage(), ex);
         }
     }
+
+    // Builds the optional `?widths=` query string from SDK-provided widths.
+    private String buildWidthsQueryParam(List<Integer> widths) {
+        if (widths == null || widths.isEmpty()) {
+            return "";
+        }
+        String joined = widths.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return "?widths=" + joined;
+    }
+
+    // Creates HTTP request timeout configuration for the widths-config endpoint.
+    private RequestConfig buildRequestConfig(int timeoutMs) {
+        return RequestConfig.custom()
+                .setSocketTimeout(timeoutMs)
+                .setConnectTimeout(timeoutMs)
+                .build();
+    }
+
+    // Calls Percy CLI widths-config endpoint and validates that the HTTP status is successful.
+    private HttpResponse fetchWidthsConfigResponse(CloseableHttpClient httpClient, String queryParam) throws Exception {
+        HttpGet httpget = new HttpGet(PERCY_SERVER_ADDRESS + "/percy/widths-config" + queryParam);
+        HttpResponse response = httpClient.execute(httpget);
+        int statusCode = response.getStatusLine().getStatusCode();
+
+        if (statusCode != 200) {
+            EntityUtils.consume(response.getEntity());
+            log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+            throw new RuntimeException("Failed to fetch widths-config (HTTP " + statusCode + ")");
+        }
+
+        return response;
+    }
+
+    // Parses widths-config JSON and converts the payload to SDK width/height maps.
+    private List<Map<String, Object>> parseWidthsConfigResponse(HttpResponse response) throws Exception {
+        String responseString = EntityUtils.toString(response.getEntity(), "UTF-8");
+        JSONObject json = new JSONObject(responseString);
+
+        if (!json.has("widths") || json.isNull("widths")) {
+            log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+            throw new RuntimeException("Missing \"widths\" in widths-config response");
+        }
+
+        JSONArray widthsArray = json.getJSONArray("widths");
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = 0; i < widthsArray.length(); i++) {
+            JSONObject entry = widthsArray.getJSONObject(i);
+            Map<String, Object> item = new HashMap<>();
+            item.put("width", entry.getInt("width"));
+            if (entry.has("height") && !entry.isNull("height")) {
+                item.put("height", entry.getInt("height"));
+            }
+            result.add(item);
+        }
+        return result;
+    }
+    
     private boolean isCaptureResponsiveDOM(Map<String, Object> options) {
         if (cliConfig.has("percy") && !cliConfig.isNull("percy")) {
             JSONObject percyProperty = cliConfig.getJSONObject("percy");
@@ -785,6 +804,53 @@ public class Percy {
         return coercedWidths.isEmpty() ? null : coercedWidths;
     }
 
+    // Resolves final viewport height for responsive capture using minHeight config when enabled.
+    private int resolveResponsiveTargetHeight(Map<String, Object> options, JavascriptExecutor jse, int currentHeight) {
+        if (!PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
+            log("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is disabled, using current window height: " + currentHeight, "debug");
+            return currentHeight;
+        }
+
+        Integer minHeight = resolveConfiguredMinHeight(options);
+        if (minHeight == null) {
+            log("minHeight not found in options or cliConfig, using current window height: " + currentHeight, "debug");
+            return currentHeight;
+        }
+
+        return calculateTargetHeight(jse, minHeight, currentHeight);
+    }
+
+    // Reads minHeight from snapshot options first, then falls back to CLI snapshot config.
+    private Integer resolveConfiguredMinHeight(Map<String, Object> options) {
+        Object minHeightObj = options.get("minHeight");
+        if (minHeightObj == null && cliConfig != null && cliConfig.has("snapshot")) {
+            JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
+            if (snapshotConfig.has("minHeight")) {
+                minHeightObj = snapshotConfig.getInt("minHeight");
+            }
+        }
+
+        if (minHeightObj == null) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(minHeightObj.toString());
+        } catch (NumberFormatException e) {
+            log("Invalid minHeight value " + minHeightObj + "; expected integer, using current window height instead.", "debug");
+            return null;
+        }
+    }
+
+    // Converts content minHeight into browser outer height while preserving fallback behavior.
+    private int calculateTargetHeight(JavascriptExecutor jse, int minHeight, int fallbackHeight) {
+        Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
+        if (result instanceof Number) {
+            return ((Number) result).intValue();
+        }
+        return fallbackHeight;
+    }
+
     public List<Map<String, Object>> captureResponsiveDom(WebDriver driver, Set<Cookie> cookies, Map<String, Object> options) {
         List<Integer> responsiveWidths = extractResponsiveWidths(options);
         List<Map<String, Object>> widths = getResponsiveWidths(responsiveWidths);
@@ -796,32 +862,7 @@ public class Percy {
         int resizeCount = 0;
         JavascriptExecutor jse = (JavascriptExecutor) driver;
         jse.executeScript("PercyDOM.waitForResize()");
-        int targetHeight = currentHeight;
-
-        if (PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
-            Object minHeightObj = options.get("minHeight");
-            if (minHeightObj == null && cliConfig != null && cliConfig.has("snapshot")) {
-                JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
-                if (snapshotConfig.has("minHeight")) {
-                    minHeightObj = snapshotConfig.getInt("minHeight");
-                    }
-            }
-            if (minHeightObj != null) {
-                try {
-                    int minHeight = Integer.parseInt(minHeightObj.toString());
-                    Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
-                    if (result instanceof Number) {
-                        targetHeight = ((Number) result).intValue();
-                    }
-                } catch (NumberFormatException e) {
-                    log("Invalid minHeight value " + minHeightObj + "; expected integer, using current window height instead.", "debug");
-                }
-            } else {
-                log("minHeight not found in options or cliConfig, using current window height: " + targetHeight, "debug");
-            }
-        } else {
-            log("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is disabled, using current window height: " + targetHeight, "debug");
-        }
+        int targetHeight = resolveResponsiveTargetHeight(options, jse, currentHeight);
         for (Map<String, Object> widthMap : widths) {
             Object widthObj = widthMap.get("width");
             if (!(widthObj instanceof Number)) {

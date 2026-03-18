@@ -23,6 +23,11 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.openqa.selenium.By;
@@ -307,6 +312,252 @@ import java.net.URL;
       boolean result = (boolean) invokePrivate(mockedPercy, "isCaptureResponsiveDOM", new Class[]{Map.class}, options);
 
       assertFalse(result);
+    }
+
+    @Test
+    public void buildWidthsQueryParamReturnsJoinedValues() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      String result = (String) invokePrivate(
+        mockedPercy,
+        "buildWidthsQueryParam",
+        new Class[]{List.class},
+        Arrays.asList(375, 1280)
+      );
+
+      assertEquals("?widths=375,1280", result);
+    }
+
+    @Test
+    public void buildWidthsQueryParamReturnsEmptyForNullOrEmptyInput() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      String nullResult = (String) invokePrivate(
+        mockedPercy,
+        "buildWidthsQueryParam",
+        new Class[]{List.class},
+        new Object[]{null}
+      );
+      String emptyResult = (String) invokePrivate(
+        mockedPercy,
+        "buildWidthsQueryParam",
+        new Class[]{List.class},
+        Collections.emptyList()
+      );
+
+      assertEquals("", nullResult);
+      assertEquals("", emptyResult);
+    }
+
+    @Test
+    public void buildRequestConfigUsesProvidedTimeout() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      RequestConfig requestConfig = (RequestConfig) invokePrivate(
+        mockedPercy,
+        "buildRequestConfig",
+        new Class[]{int.class},
+        12345
+      );
+
+      assertEquals(12345, requestConfig.getSocketTimeout());
+      assertEquals(12345, requestConfig.getConnectTimeout());
+    }
+
+    @Test
+    public void fetchWidthsConfigResponseReturnsHttp200Response() throws Exception {
+      HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+      server.createContext("/percy/widths-config", new HttpHandler() {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+          byte[] body = "{\"widths\":[{\"width\":375}]}".getBytes("UTF-8");
+          exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+          }
+        }
+      });
+      server.start();
+
+      String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+      try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+
+        HttpResponse response = (HttpResponse) invokePrivate(
+          mockedPercy,
+          "fetchWidthsConfigResponse",
+          new Class[]{CloseableHttpClient.class, String.class},
+          httpClient,
+          "?widths=375"
+        );
+
+        assertEquals(HttpURLConnection.HTTP_OK, response.getStatusLine().getStatusCode());
+      } finally {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+        server.stop(0);
+      }
+    }
+
+    @Test
+    public void parseWidthsConfigResponseParsesWidthAndHeightValues() throws Exception {
+      HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+      server.createContext("/percy/widths-config", new HttpHandler() {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+          byte[] body = "{\"widths\":[{\"width\":375},{\"width\":1280,\"height\":900}]}".getBytes("UTF-8");
+          exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+          }
+        }
+      });
+      server.start();
+
+      String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+      try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+
+        HttpResponse response = (HttpResponse) invokePrivate(
+          mockedPercy,
+          "fetchWidthsConfigResponse",
+          new Class[]{CloseableHttpClient.class, String.class},
+          httpClient,
+          ""
+        );
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> parsed = (List<Map<String, Object>>) invokePrivate(
+          mockedPercy,
+          "parseWidthsConfigResponse",
+          new Class[]{HttpResponse.class},
+          response
+        );
+
+        assertEquals(2, parsed.size());
+        assertEquals(375, parsed.get(0).get("width"));
+        assertEquals(1280, parsed.get(1).get("width"));
+        assertEquals(900, parsed.get(1).get("height"));
+      } finally {
+        setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+        server.stop(0);
+      }
+    }
+
+    @Test
+    public void resolveConfiguredMinHeightUsesOptionsAndCliFallback() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      Map<String, Object> optionsWithValue = new HashMap<String, Object>();
+      optionsWithValue.put("minHeight", "1200");
+      Integer fromOptions = (Integer) invokePrivate(
+        mockedPercy,
+        "resolveConfiguredMinHeight",
+        new Class[]{Map.class},
+        optionsWithValue
+      );
+      assertEquals(1200, fromOptions);
+
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject().put("minHeight", 900)));
+      Map<String, Object> optionsWithoutValue = new HashMap<String, Object>();
+      Integer fromCliConfig = (Integer) invokePrivate(
+        mockedPercy,
+        "resolveConfiguredMinHeight",
+        new Class[]{Map.class},
+        optionsWithoutValue
+      );
+      assertEquals(900, fromCliConfig);
+    }
+
+    @Test
+    public void resolveConfiguredMinHeightReturnsNullForInvalidValue() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("minHeight", "invalid");
+
+      Integer result = (Integer) invokePrivate(
+        mockedPercy,
+        "resolveConfiguredMinHeight",
+        new Class[]{Map.class},
+        options
+      );
+
+      assertNull(result);
+    }
+
+    @Test
+    public void calculateTargetHeightReturnsComputedOrFallbackValue() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+      JavascriptExecutor mockedJs = mock(JavascriptExecutor.class);
+
+      when(mockedJs.executeScript(any(String.class))).thenReturn(1337);
+      int computed = (int) invokePrivate(
+        mockedPercy,
+        "calculateTargetHeight",
+        new Class[]{JavascriptExecutor.class, int.class, int.class},
+        mockedJs,
+        1200,
+        900
+      );
+      assertEquals(1337, computed);
+
+      when(mockedJs.executeScript(any(String.class))).thenReturn("not-a-number");
+      int fallback = (int) invokePrivate(
+        mockedPercy,
+        "calculateTargetHeight",
+        new Class[]{JavascriptExecutor.class, int.class, int.class},
+        mockedJs,
+        1200,
+        900
+      );
+      assertEquals(900, fallback);
+    }
+
+    @Test
+    public void resolveResponsiveTargetHeightRespectsFeatureFlagAndMinHeight() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+      JavascriptExecutor mockedJs = mock(JavascriptExecutor.class);
+      when(mockedJs.executeScript(any(String.class))).thenReturn(1400);
+
+      boolean originalFlag = getStaticBooleanField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT");
+      try {
+        setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", false);
+        int disabledResult = (int) invokePrivate(
+          mockedPercy,
+          "resolveResponsiveTargetHeight",
+          new Class[]{Map.class, JavascriptExecutor.class, int.class},
+          new HashMap<String, Object>(),
+          mockedJs,
+          800
+        );
+        assertEquals(800, disabledResult);
+
+        setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", true);
+        Map<String, Object> options = new HashMap<String, Object>();
+        options.put("minHeight", 1200);
+        int enabledResult = (int) invokePrivate(
+          mockedPercy,
+          "resolveResponsiveTargetHeight",
+          new Class[]{Map.class, JavascriptExecutor.class, int.class},
+          options,
+          mockedJs,
+          800
+        );
+        assertEquals(1400, enabledResult);
+      } finally {
+        setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", originalFlag);
+      }
     }
 
     @Test
@@ -710,5 +961,11 @@ import java.net.URL;
       Field field = clazz.getDeclaredField(fieldName);
       field.setAccessible(true);
       return (String) field.get(null);
+    }
+
+    private static boolean getStaticBooleanField(Class<?> clazz, String fieldName) throws Exception {
+      Field field = clazz.getDeclaredField(fieldName);
+      field.setAccessible(true);
+      return (boolean) field.get(null);
     }
 }
