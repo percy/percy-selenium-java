@@ -630,7 +630,7 @@ public class Percy {
                 driver.switchTo().defaultContent();
             } catch (Exception err) {
                 throw new RuntimeException(
-                    "Fatal: could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable."
+                    "Fatal: could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable.",err
                 );
             }
         }
@@ -681,6 +681,14 @@ public class Percy {
                         }
                     } catch (Exception e) {
                         log("Skipping frame \"" + frameSrc + "\" due to error: " + e.getMessage(), "debug");
+                        String message = e.getMessage();
+                         if (message != null && message.contains("Fatal")) {
+                             if (e instanceof RuntimeException) {
+                                 throw (RuntimeException) e;
+                             } else {
+                                 throw new RuntimeException("Fatal error while processing iframe \"" + frameSrc + "\"", e);
+                             }
+                         }
                     }
                 }
                 if (!processedFrames.isEmpty()) {
@@ -689,6 +697,15 @@ public class Percy {
             }
         } catch (Exception e) {
             log("Failed to process cross-origin iframes: " + e.getMessage(), "debug");
+            String message = e.getMessage();
+             if (message != null && message.contains("Fatal")) {
+                 // Propagate fatal iframe processing errors to avoid returning a corrupted DOM snapshot
+                 if (e instanceof RuntimeException) {
+                     throw (RuntimeException) e;
+                 } else {
+                     throw new RuntimeException("Fatal error while processing cross-origin iframes", e);
+                 }
+             }
         }
         return mutableSnapshot;
     }
@@ -730,9 +747,7 @@ public class Percy {
             log("Resizing using CDP failed, falling back to driver for width " + width + ": " + e.getMessage(), "debug");
             driver.manage().window().setSize(new Dimension(width, height));
         }
-
         // Wait for window resize event using WebDriverWait
-        // Made changes to handle handles the temporary null state of resizeCountObj  during page reload 
         try {
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(1));
             wait.until((ExpectedCondition<Boolean>) d -> {
@@ -747,14 +762,36 @@ public class Percy {
         }
     }
 
-    // Capture responsive DOM for different widths
+    private List<Integer> extractResponsiveWidths(Map<String, Object> options) {
+        if (options == null) {
+            return null;
+        }
+        Object widthsOption = options.get("widths");
+        if (!(widthsOption instanceof List<?>)) {
+            return null;
+        }
+        List<?> rawWidths = (List<?>) widthsOption;
+        List<Integer> coercedWidths = new ArrayList<>();
+        for (Object value : rawWidths) {
+            if (value instanceof Number) {
+                coercedWidths.add(((Number) value).intValue());
+            } else if (value instanceof String) {
+                try {
+                    coercedWidths.add(Integer.parseInt((String) value));
+                } catch (NumberFormatException ignore) {
+                }
+            }
+        }
+        return coercedWidths.isEmpty() ? null : coercedWidths;
+    }
+
     public List<Map<String, Object>> captureResponsiveDom(WebDriver driver, Set<Cookie> cookies, Map<String, Object> options) {
-        List<Map<String, Object>> widths = getResponsiveWidths((List<Integer>) options.get("widths"));
+        List<Integer> responsiveWidths = extractResponsiveWidths(options);
+        List<Map<String, Object>> widths = getResponsiveWidths(responsiveWidths);
         List<Map<String, Object>> domSnapshots = new ArrayList<>();
         Dimension windowSize = driver.manage().window().getSize();
         int currentWidth = windowSize.getWidth();
         int currentHeight = windowSize.getHeight();
-        log("Initial window size: " + currentWidth + "x" + currentHeight, "debug");
         int lastWindowWidth = currentWidth;
         int resizeCount = 0;
         JavascriptExecutor jse = (JavascriptExecutor) driver;
@@ -775,7 +812,6 @@ public class Percy {
                     Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
                     if (result instanceof Number) {
                         targetHeight = ((Number) result).intValue();
-                        log("Calculated height for responsive capture using minHeight: " + targetHeight, "debug");
                     }
                 } catch (NumberFormatException e) {
                     log("Invalid minHeight value " + minHeightObj + "; expected integer, using current window height instead.", "debug");
@@ -793,16 +829,13 @@ public class Percy {
             }
             int width = ((Number) widthObj).intValue();
             Object heightObj = widthMap.get("height");
-            log("Width entry: width=" + width + ", height from widths config=" + heightObj + ", targetHeight=" + targetHeight, "debug");
             int heightForWidth = (heightObj instanceof Number)? ((Number) heightObj).intValue(): targetHeight;
             if (lastWindowWidth != width) {
                 resizeCount++;
-                log("Resizing window to width=" + width + ", height=" + heightForWidth, "debug");
                 changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
                 lastWindowWidth = width;
             }
             if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
-                log("Reloading page for width: " + width, "debug");
                 driver.navigate().refresh();
                 jse.executeScript(fetchPercyDOM());
                 jse.executeScript("PercyDOM.waitForResize()");
@@ -823,8 +856,9 @@ public class Percy {
 
         return domSnapshots;
         }
-        protected static void log(String message) {
-            log(message, "info");
+    
+    protected static void log(String message) {
+    log(message, "info");
     }
 
     protected static void log(String message, String level) {
