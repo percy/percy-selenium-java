@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterAll;
@@ -32,6 +33,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Cookie;
+import org.openqa.selenium.Dimension;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
@@ -936,6 +938,202 @@ import java.net.URL;
         Map<String, Object> assertion = (Map<String, Object>) region.get("assertion");
         assertNotNull(assertion);
         assertEquals(0.1, assertion.get("diffIgnoreThreshold"));
+    }
+
+    @Test
+    public void captureResponsiveDomResizesToCorrectWidthAndHeight() throws Exception {
+        // Serve two widths: one with an explicit height and one without.
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/percy/widths-config", exchange -> {
+            byte[] body = "{\"widths\":[{\"width\":375,\"height\":812},{\"width\":1280}]}".getBytes("UTF-8");
+            exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(body); }
+        });
+        server.start();
+
+        String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+        try {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+
+            RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+            Percy mockedPercy = spy(new Percy(mockedDriver));
+            setField(mockedPercy, "domJs", "/* percy dom */");
+            setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+
+            // Track actual setSize calls so window.resizeCount can echo the right value.
+            AtomicInteger dimensionChangeCount = new AtomicInteger(0);
+            WebDriver.Options driverOptions = mock(WebDriver.Options.class);
+            WebDriver.Window driverWindow = mock(WebDriver.Window.class);
+            when(mockedDriver.manage()).thenReturn(driverOptions);
+            when(driverOptions.window()).thenReturn(driverWindow);
+            when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
+            doAnswer(inv -> { dimensionChangeCount.incrementAndGet(); return null; })
+                .when(driverWindow).setSize(any(Dimension.class));
+
+            when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+            when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
+            when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+                String script = invocation.getArgument(0);
+                if (script.equals("return window.resizeCount")) {
+                    return (long) dimensionChangeCount.get();
+                }
+                if (script.startsWith("return PercyDOM.serialize(")) {
+                    Map<String, Object> snap = new HashMap<>();
+                    snap.put("dom", "test");
+                    return snap;
+                }
+                return null;
+            });
+
+            Map<String, Object> options = new HashMap<>();
+            options.put("widths", Arrays.asList(375, 1280));
+            List<Map<String, Object>> snapshots =
+                mockedPercy.captureResponsiveDom(mockedDriver, new HashSet<>(), options);
+
+            ArgumentCaptor<Dimension> sizeCaptor = ArgumentCaptor.forClass(Dimension.class);
+            // 3 calls expected: resize to 375x812, resize to 1280x768, restore 1024x768.
+            verify(driverWindow, times(3)).setSize(sizeCaptor.capture());
+            List<Dimension> sizes = sizeCaptor.getAllValues();
+
+            // First width uses the explicit height returned by the server.
+            assertEquals(375,  sizes.get(0).getWidth());
+            assertEquals(812,  sizes.get(0).getHeight());
+
+            // Second width has no explicit height: falls back to currentHeight (768).
+            assertEquals(1280, sizes.get(1).getWidth());
+            assertEquals(768,  sizes.get(1).getHeight());
+
+            // Final call restores the original window size.
+            assertEquals(1024, sizes.get(2).getWidth());
+            assertEquals(768,  sizes.get(2).getHeight());
+
+            // Each snapshot must carry the width it was captured at.
+            assertEquals(2,   snapshots.size());
+            assertEquals(375, snapshots.get(0).get("width"));
+            assertEquals(1280, snapshots.get(1).get("width"));
+        } finally {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void captureResponsiveDomSkipsResizeWhenDimensionsUnchanged() throws Exception {
+        // Return the exact same width as the initial window — no per-width resize should occur.
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/percy/widths-config", exchange -> {
+            byte[] body = "{\"widths\":[{\"width\":1024}]}".getBytes("UTF-8");
+            exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(body); }
+        });
+        server.start();
+
+        String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+        try {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+
+            RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+            Percy mockedPercy = spy(new Percy(mockedDriver));
+            setField(mockedPercy, "domJs", "/* percy dom */");
+            setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+
+            AtomicInteger dimensionChangeCount = new AtomicInteger(0);
+            WebDriver.Options driverOptions = mock(WebDriver.Options.class);
+            WebDriver.Window driverWindow = mock(WebDriver.Window.class);
+            when(mockedDriver.manage()).thenReturn(driverOptions);
+            when(driverOptions.window()).thenReturn(driverWindow);
+            when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
+            doAnswer(inv -> { dimensionChangeCount.incrementAndGet(); return null; })
+                .when(driverWindow).setSize(any(Dimension.class));
+
+            when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+            when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
+            when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+                String script = invocation.getArgument(0);
+                if (script.equals("return window.resizeCount")) {
+                    return (long) dimensionChangeCount.get();
+                }
+                if (script.startsWith("return PercyDOM.serialize(")) {
+                    Map<String, Object> snap = new HashMap<>();
+                    snap.put("dom", "test");
+                    return snap;
+                }
+                return null;
+            });
+
+            Map<String, Object> options = new HashMap<>();
+            options.put("widths", Arrays.asList(1024));
+            mockedPercy.captureResponsiveDom(mockedDriver, new HashSet<>(), options);
+
+            // Only the final restore call should fire; no per-width resize.
+            ArgumentCaptor<Dimension> sizeCaptor = ArgumentCaptor.forClass(Dimension.class);
+            verify(driverWindow, times(1)).setSize(sizeCaptor.capture());
+            Dimension restoreSize = sizeCaptor.getValue();
+            assertEquals(1024, restoreSize.getWidth());
+            assertEquals(768,  restoreSize.getHeight());
+        } finally {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void captureResponsiveDomRefreshesDriverForEachWidthWhenReloadFlagSet() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/percy/widths-config", exchange -> {
+            byte[] body = "{\"widths\":[{\"width\":375},{\"width\":1280}]}".getBytes("UTF-8");
+            exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(body); }
+        });
+        server.start();
+
+        String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+        boolean originalReloadFlag = getStaticBooleanField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE");
+        try {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+            setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", true);
+
+            RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+            Percy mockedPercy = spy(new Percy(mockedDriver));
+            setField(mockedPercy, "domJs", "/* percy dom */");
+            setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+
+            WebDriver.Options driverOptions = mock(WebDriver.Options.class);
+            WebDriver.Window driverWindow = mock(WebDriver.Window.class);
+            WebDriver.Navigation navigation = mock(WebDriver.Navigation.class);
+            when(mockedDriver.manage()).thenReturn(driverOptions);
+            when(driverOptions.window()).thenReturn(driverWindow);
+            when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
+            when(mockedDriver.navigate()).thenReturn(navigation);
+            when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+            when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
+
+            // After each reload resizeCount resets to 0, so the next changeWindowDimensionAndWait
+            // call uses resizeCount=1. Return 1L so the wait resolves without timing out.
+            when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+                String script = invocation.getArgument(0);
+                if (script.equals("return window.resizeCount")) {
+                    return 1L;
+                }
+                if (script.startsWith("return PercyDOM.serialize(")) {
+                    Map<String, Object> snap = new HashMap<>();
+                    snap.put("dom", "test");
+                    return snap;
+                }
+                return null;
+            });
+
+            Map<String, Object> options = new HashMap<>();
+            options.put("widths", Arrays.asList(375, 1280));
+            mockedPercy.captureResponsiveDom(mockedDriver, new HashSet<>(), options);
+
+            // driver.navigate().refresh() must be called once per captured width.
+            verify(navigation, times(2)).refresh();
+        } finally {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+            setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", originalReloadFlag);
+            server.stop(0);
+        }
     }
 
     private static Object invokePrivate(Object target, String methodName, Class<?>[] paramTypes, Object... args)

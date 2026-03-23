@@ -50,9 +50,9 @@ public class Percy {
 
     private static String RESPONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault("RESPONSIVE_CAPTURE_SLEEP_TIME", "");
 
-    private static String PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase();
+    private static boolean PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase());
     
-    private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false"));
+    private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false").toLowerCase());
     private static final int WIDTHS_CONFIG_TIMEOUT_MS = 30000;
     // for logging
     private static String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
@@ -619,8 +619,6 @@ public class Percy {
         String frameUrl = frameElement.getAttribute("src");
         if (frameUrl == null) frameUrl = "unknown-src";
         final String finalFrameUrl = frameUrl;
-        log("processFrame: checking iframe src=\"" + finalFrameUrl + "\"", "debug");
-
         String percyElementId = frameElement.getAttribute("data-percy-element-id");
         log("processFrame: data-percy-element-id=\"" + percyElementId + "\" for src=\"" + finalFrameUrl + "\"", "debug");
         if (percyElementId == null || percyElementId.isEmpty()) {
@@ -665,12 +663,9 @@ public class Percy {
     }
 
     private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
-        // 1. Serialize the main page first (this adds the data-percy-element-ids)
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
-        
-        // 2. Process CORS IFrames
         try {
             String pageOrigin = getOrigin(driver.getCurrentUrl());
             List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
@@ -859,6 +854,7 @@ public class Percy {
         int currentWidth = windowSize.getWidth();
         int currentHeight = windowSize.getHeight();
         int lastWindowWidth = currentWidth;
+        int lastWindowHeight = currentHeight;
         int resizeCount = 0;
         JavascriptExecutor jse = (JavascriptExecutor) driver;
         jse.executeScript("PercyDOM.waitForResize()");
@@ -871,12 +867,13 @@ public class Percy {
             int width = ((Number) widthObj).intValue();
             Object heightObj = widthMap.get("height");
             int heightForWidth = (heightObj instanceof Number)? ((Number) heightObj).intValue(): targetHeight;
-            if (lastWindowWidth != width) {
+            if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {
                 resizeCount++;
                 changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
                 lastWindowWidth = width;
+                lastWindowHeight = heightForWidth;
             }
-            if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
+            if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
                 driver.navigate().refresh();
                 jse.executeScript(fetchPercyDOM());
                 jse.executeScript("PercyDOM.waitForResize()");
@@ -896,7 +893,7 @@ public class Percy {
         changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
 
         return domSnapshots;
-        }
+    }
     
     protected static void log(String message) {
     log(message, "info");
