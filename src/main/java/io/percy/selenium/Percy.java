@@ -800,7 +800,7 @@ public class Percy {
     }
 
     // Resolves final viewport height for responsive capture using minHeight config when enabled.
-    private int resolveResponsiveTargetHeight(Map<String, Object> options, JavascriptExecutor jse, int currentHeight) {
+    private int resolveResponsiveTargetHeight(Map<String, Object> options, int currentHeight) {
         if (!PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
             log("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is disabled, using current window height: " + currentHeight, "debug");
             return currentHeight;
@@ -812,7 +812,7 @@ public class Percy {
             return currentHeight;
         }
 
-        return calculateTargetHeight(jse, minHeight, currentHeight);
+        return minHeight;
     }
 
     // Reads minHeight from snapshot options first, then falls back to CLI snapshot config.
@@ -837,14 +837,7 @@ public class Percy {
         }
     }
 
-    // Converts content minHeight into browser outer height while preserving fallback behavior.
-    private int calculateTargetHeight(JavascriptExecutor jse, int minHeight, int fallbackHeight) {
-        Object result = jse.executeScript("return window.outerHeight - window.innerHeight + " + minHeight);
-        if (result instanceof Number) {
-            return ((Number) result).intValue();
-        }
-        return fallbackHeight;
-    }
+
 
     public List<Map<String, Object>> captureResponsiveDom(WebDriver driver, Set<Cookie> cookies, Map<String, Object> options) {
         List<Integer> responsiveWidths = extractResponsiveWidths(options);
@@ -858,7 +851,7 @@ public class Percy {
         int resizeCount = 0;
         JavascriptExecutor jse = (JavascriptExecutor) driver;
         jse.executeScript("PercyDOM.waitForResize()");
-        int targetHeight = resolveResponsiveTargetHeight(options, jse, currentHeight);
+        int targetHeight = resolveResponsiveTargetHeight(options, currentHeight);
         for (Map<String, Object> widthMap : widths) {
             Object widthObj = widthMap.get("width");
             if (!(widthObj instanceof Number)) {
@@ -866,14 +859,17 @@ public class Percy {
             }
             int width = ((Number) widthObj).intValue();
             Object heightObj = widthMap.get("height");
+            System.out.println("Processing responsive snapshot for width " + width + " with target height " + targetHeight+ "height obj: " + heightObj);
             int heightForWidth = (heightObj instanceof Number)? ((Number) heightObj).intValue(): targetHeight;
-            if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {
+            System.out.println("final height" + heightForWidth);
+            if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {       
                 resizeCount++;
+                System.out.println("Resizing window to width " + width + " and height " + heightForWidth);
                 changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
                 lastWindowWidth = width;
                 lastWindowHeight = heightForWidth;
             }
-            if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
+            if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
                 driver.navigate().refresh();
                 jse.executeScript(fetchPercyDOM());
                 jse.executeScript("PercyDOM.waitForResize()");

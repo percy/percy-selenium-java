@@ -497,40 +497,9 @@ import java.net.URL;
     }
 
     @Test
-    public void calculateTargetHeightReturnsComputedOrFallbackValue() throws Exception {
-      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
-      Percy mockedPercy = spy(new Percy(mockedDriver));
-      JavascriptExecutor mockedJs = mock(JavascriptExecutor.class);
-
-      when(mockedJs.executeScript(any(String.class))).thenReturn(1337);
-      int computed = (int) invokePrivate(
-        mockedPercy,
-        "calculateTargetHeight",
-        new Class[]{JavascriptExecutor.class, int.class, int.class},
-        mockedJs,
-        1200,
-        900
-      );
-      assertEquals(1337, computed);
-
-      when(mockedJs.executeScript(any(String.class))).thenReturn("not-a-number");
-      int fallback = (int) invokePrivate(
-        mockedPercy,
-        "calculateTargetHeight",
-        new Class[]{JavascriptExecutor.class, int.class, int.class},
-        mockedJs,
-        1200,
-        900
-      );
-      assertEquals(900, fallback);
-    }
-
-    @Test
     public void resolveResponsiveTargetHeightRespectsFeatureFlagAndMinHeight() throws Exception {
       RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
       Percy mockedPercy = spy(new Percy(mockedDriver));
-      JavascriptExecutor mockedJs = mock(JavascriptExecutor.class);
-      when(mockedJs.executeScript(any(String.class))).thenReturn(1400);
 
       boolean originalFlag = getStaticBooleanField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT");
       try {
@@ -538,9 +507,8 @@ import java.net.URL;
         int disabledResult = (int) invokePrivate(
           mockedPercy,
           "resolveResponsiveTargetHeight",
-          new Class[]{Map.class, JavascriptExecutor.class, int.class},
+          new Class[]{Map.class, int.class},
           new HashMap<String, Object>(),
-          mockedJs,
           800
         );
         assertEquals(800, disabledResult);
@@ -551,12 +519,11 @@ import java.net.URL;
         int enabledResult = (int) invokePrivate(
           mockedPercy,
           "resolveResponsiveTargetHeight",
-          new Class[]{Map.class, JavascriptExecutor.class, int.class},
+          new Class[]{Map.class, int.class},
           options,
-          mockedJs,
           800
         );
-        assertEquals(1400, enabledResult);
+        assertEquals(1200, enabledResult);
       } finally {
         setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", originalFlag);
       }
