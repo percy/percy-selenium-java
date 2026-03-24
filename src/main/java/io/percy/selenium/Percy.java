@@ -869,7 +869,7 @@ public class Percy {
                 lastWindowWidth = width;
                 lastWindowHeight = heightForWidth;
             }
-            if ("true".equals(PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)) {
+            if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
                 driver.navigate().refresh();
                 jse.executeScript(fetchPercyDOM());
                 jse.executeScript("PercyDOM.waitForResize()");
