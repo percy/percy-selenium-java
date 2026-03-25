@@ -48,7 +48,10 @@ public class Percy {
     // Determine if we're debug logging
     private static boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
 
-    private static String RESPONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault("RESPONSIVE_CAPTURE_SLEEP_TIME", "");
+    private static String RESPONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault(
+        "RESPONSIVE_CAPTURE_SLEEP_TIME",
+        System.getenv().getOrDefault("RESONSIVE_CAPTURE_SLEEP_TIME", "")
+    );
 
     private static boolean PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase());
     
@@ -367,6 +370,8 @@ public class Percy {
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
             log(e.getMessage(), "debug");
+        } catch (Exception e) {
+            log("Snapshot failed: " + e.getMessage(), "debug");
         }
 
         return postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
@@ -593,6 +598,12 @@ public class Percy {
         return jsBuilder.toString();
     }
 
+    static class FatalIframeException extends RuntimeException {
+        FatalIframeException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     private boolean isUnsupportedIframeSrc(String src) {
         return src == null || src.isEmpty() ||
                src.equals("about:blank") ||
@@ -646,8 +657,8 @@ public class Percy {
             try {
                 driver.switchTo().defaultContent();
             } catch (Exception err) {
-                throw new RuntimeException(
-                    "Fatal: could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable.",err
+                throw new FatalIframeException(
+                    "Could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable.", err
                 );
             }
         }
@@ -693,33 +704,20 @@ public class Percy {
                         if (result != null) {
                             processedFrames.add(result);
                         }
+                    } catch (FatalIframeException e) {
+                        throw e;
                     } catch (Exception e) {
                         log("Skipping frame \"" + frameSrc + "\" due to error: " + e.getMessage(), "debug");
-                        String message = e.getMessage();
-                         if (message != null && message.contains("Fatal")) {
-                             if (e instanceof RuntimeException) {
-                                 throw (RuntimeException) e;
-                             } else {
-                                 throw new RuntimeException("Fatal error while processing iframe \"" + frameSrc + "\"", e);
-                             }
-                         }
                     }
                 }
                 if (!processedFrames.isEmpty()) {
                     mutableSnapshot.put("corsIframes", processedFrames);
                 }
             }
+        } catch (FatalIframeException e) {
+            throw e;
         } catch (Exception e) {
             log("Failed to process cross-origin iframes: " + e.getMessage(), "debug");
-            String message = e.getMessage();
-             if (message != null && message.contains("Fatal")) {
-                 // Propagate fatal iframe processing errors to avoid returning a corrupted DOM snapshot
-                 if (e instanceof RuntimeException) {
-                     throw (RuntimeException) e;
-                 } else {
-                     throw new RuntimeException("Fatal error while processing cross-origin iframes", e);
-                 }
-             }
         }
         return mutableSnapshot;
     }
@@ -852,47 +850,50 @@ public class Percy {
         JavascriptExecutor jse = (JavascriptExecutor) driver;
         jse.executeScript("PercyDOM.waitForResize()");
         int targetHeight = resolveResponsiveTargetHeight(options, currentHeight);
-        for (Map<String, Object> widthMap : widths) {
-            Object widthObj = widthMap.get("width");
-            if (!(widthObj instanceof Number)) {
-                continue;
-            }
-            int width = ((Number) widthObj).intValue();
-            Object heightObj = widthMap.get("height");
-            System.out.println("Processing responsive snapshot for width " + width + " with target height " + targetHeight+ "height obj: " + heightObj);
-            int heightForWidth = (heightObj instanceof Number)? ((Number) heightObj).intValue(): targetHeight;
-            System.out.println("final height" + heightForWidth);
-            if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {       
-                resizeCount++;
-                System.out.println("Resizing window to width " + width + " and height " + heightForWidth);
-                changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
-                lastWindowWidth = width;
-                lastWindowHeight = heightForWidth;
-            }
-            if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
-                driver.navigate().refresh();
-                jse.executeScript(fetchPercyDOM());
-                jse.executeScript("PercyDOM.waitForResize()");
-                resizeCount = 0; 
-            }
-            try {
-                if (RESPONSIVE_CAPTURE_SLEEP_TIME != null && !RESPONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
-                    int sleepTime = Integer.parseInt(RESPONSIVE_CAPTURE_SLEEP_TIME);
-                    Thread.sleep(sleepTime * 1000L);
+        try {
+            for (Map<String, Object> widthMap : widths) {
+                Object widthObj = widthMap.get("width");
+                if (!(widthObj instanceof Number)) {
+                    continue;
                 }
-            } catch (InterruptedException | NumberFormatException ignored) {
+                int width = ((Number) widthObj).intValue();
+                Object heightObj = widthMap.get("height");
+                log("Processing responsive snapshot for width " + width + " with target height " + targetHeight + ", height obj: " + heightObj, "debug");
+                int heightForWidth = (heightObj instanceof Number) ? ((Number) heightObj).intValue() : targetHeight;
+                log("Final height: " + heightForWidth, "debug");
+                if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {
+                    resizeCount++;
+                    log("Resizing window to width " + width + " and height " + heightForWidth, "debug");
+                    changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
+                    lastWindowWidth = width;
+                    lastWindowHeight = heightForWidth;
+                }
+                if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
+                    driver.navigate().refresh();
+                    jse.executeScript(fetchPercyDOM());
+                    jse.executeScript("PercyDOM.waitForResize()");
+                    resizeCount = 0;
+                }
+                try {
+                    if (RESPONSIVE_CAPTURE_SLEEP_TIME != null && !RESPONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
+                        int sleepTime = Integer.parseInt(RESPONSIVE_CAPTURE_SLEEP_TIME);
+                        Thread.sleep(sleepTime * 1000L);
+                    }
+                } catch (InterruptedException | NumberFormatException ignored) {
+                }
+                Map<String, Object> domSnapshot = getSerializedDOM(jse, cookies, options);
+                domSnapshot.put("width", width);
+                domSnapshots.add(domSnapshot);
             }
-            Map<String, Object> domSnapshot = getSerializedDOM(jse, cookies, options);
-            domSnapshot.put("width", width);
-            domSnapshots.add(domSnapshot);
+        } finally {
+            changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
         }
-        changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
 
         return domSnapshots;
     }
     
     protected static void log(String message) {
-    log(message, "info");
+        log(message, "info");
     }
 
     protected static void log(String message, String level) {
