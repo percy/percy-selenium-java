@@ -14,6 +14,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,8 +48,15 @@ public class Percy {
     // Determine if we're debug logging
     private static boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
 
-    private static String RESONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault("RESONSIVE_CAPTURE_SLEEP_TIME", "");
+    private static String RESPONSIVE_CAPTURE_SLEEP_TIME = System.getenv().getOrDefault(
+        "RESPONSIVE_CAPTURE_SLEEP_TIME",
+        System.getenv().getOrDefault("RESONSIVE_CAPTURE_SLEEP_TIME", "")
+    );
 
+    private static boolean PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase());
+    
+    private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false").toLowerCase());
+    private static final int WIDTHS_CONFIG_TIMEOUT_MS = 30000;
     // for logging
     private static String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
 
@@ -247,6 +255,79 @@ public class Percy {
         return snapshot(name, options);
     }
 
+    private List<Map<String, Object>> getResponsiveWidths(List<Integer> widths) {
+        String queryParam = buildWidthsQueryParam(widths);
+        RequestConfig requestConfig = buildRequestConfig(WIDTHS_CONFIG_TIMEOUT_MS);
+
+        try (CloseableHttpClient httpClient = HttpClients.custom().setDefaultRequestConfig(requestConfig).build()) {
+            HttpResponse response = fetchWidthsConfigResponse(httpClient, queryParam);
+            return parseWidthsConfigResponse(response);
+        } catch (RuntimeException re) {
+            throw re;
+        } catch (Exception ex) {
+            log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+            log("Failed to fetch widths-config: " + ex.getMessage(), "debug");
+            throw new RuntimeException(
+                    "Failed to fetch widths-config: " + ex.getMessage(), ex);
+        }
+    }
+
+    // Builds the optional `?widths=` query string from SDK-provided widths.
+    private String buildWidthsQueryParam(List<Integer> widths) {
+        if (widths == null || widths.isEmpty()) {
+            return "";
+        }
+        String joined = widths.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return "?widths=" + joined;
+    }
+
+    // Creates HTTP request timeout configuration for the widths-config endpoint.
+    private RequestConfig buildRequestConfig(int timeoutMs) {
+        return RequestConfig.custom()
+                .setSocketTimeout(timeoutMs)
+                .setConnectTimeout(timeoutMs)
+                .build();
+    }
+
+    // Calls Percy CLI widths-config endpoint and validates that the HTTP status is successful.
+    private HttpResponse fetchWidthsConfigResponse(CloseableHttpClient httpClient, String queryParam) throws Exception {
+        HttpGet httpget = new HttpGet(PERCY_SERVER_ADDRESS + "/percy/widths-config" + queryParam);
+        HttpResponse response = httpClient.execute(httpget);
+        int statusCode = response.getStatusLine().getStatusCode();
+
+        if (statusCode != 200) {
+            EntityUtils.consume(response.getEntity());
+            log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+            throw new RuntimeException("Failed to fetch widths-config (HTTP " + statusCode + ")");
+        }
+
+        return response;
+    }
+
+    // Parses widths-config JSON and converts the payload to SDK width/height maps.
+    private List<Map<String, Object>> parseWidthsConfigResponse(HttpResponse response) throws Exception {
+        String responseString = EntityUtils.toString(response.getEntity(), "UTF-8");
+        JSONObject json = new JSONObject(responseString);
+
+        if (!json.has("widths") || json.isNull("widths")) {
+            log("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+            throw new RuntimeException("Missing \"widths\" in widths-config response");
+        }
+
+        JSONArray widthsArray = json.getJSONArray("widths");
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = 0; i < widthsArray.length(); i++) {
+            JSONObject entry = widthsArray.getJSONObject(i);
+            Map<String, Object> item = new HashMap<>();
+            item.put("width", entry.getInt("width"));
+            if (entry.has("height") && !entry.isNull("height")) {
+                item.put("height", entry.getInt("height"));
+            }
+            result.add(item);
+        }
+        return result;
+    }
+    
     private boolean isCaptureResponsiveDOM(Map<String, Object> options) {
         if (cliConfig.has("percy") && !cliConfig.isNull("percy")) {
             JSONObject percyProperty = cliConfig.getJSONObject("percy");
@@ -289,6 +370,8 @@ public class Percy {
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
             log(e.getMessage(), "debug");
+        } catch (Exception e) {
+            log("Snapshot failed: " + e.getMessage(), "debug");
         }
 
         return postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
@@ -515,11 +598,127 @@ public class Percy {
         return jsBuilder.toString();
     }
 
+    static class FatalIframeException extends RuntimeException {
+        FatalIframeException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    private boolean isUnsupportedIframeSrc(String src) {
+        return src == null || src.isEmpty() ||
+               src.equals("about:blank") ||
+               src.startsWith("javascript:") ||
+               src.startsWith("data:") ||
+               src.startsWith("vbscript:");
+    }
+
+    private String getOrigin(String url) {
+        try {
+            URI uri = new URI(url);
+            String scheme = uri.getScheme();
+            String authority = uri.getAuthority();
+            if (scheme == null || authority == null) return "";
+            return scheme + "://" + authority;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private Map<String, Object> processFrame(WebElement frameElement, Map<String, Object> options) {
+        // Read attributes while still in parent context — these calls will
+        // fail if made after switchTo().frame().
+        String frameUrl = frameElement.getAttribute("src");
+        if (frameUrl == null) frameUrl = "unknown-src";
+        final String finalFrameUrl = frameUrl;
+        String percyElementId = frameElement.getAttribute("data-percy-element-id");
+        log("processFrame: data-percy-element-id=\"" + percyElementId + "\" for src=\"" + finalFrameUrl + "\"", "debug");
+        if (percyElementId == null || percyElementId.isEmpty()) {
+            log("Skipping frame " + finalFrameUrl + ": no matching percyElementId found", "debug");
+            return null;
+        }
+
+        Map<String, Object> iframeSnapshot = null;
+        try {
+            driver.switchTo().frame(frameElement);
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            // Inject Percy DOM into the cross-origin frame context
+            jse.executeScript(domJs);
+            // Serialize inside the frame; enableJavaScript=true is required for CORS iframes
+            Map<String, Object> iframeOptions = new HashMap<>(options);
+            iframeOptions.put("enableJavaScript", true);
+            JSONObject optionsJson = new JSONObject(iframeOptions);
+            iframeSnapshot = (Map<String, Object>) jse.executeScript(
+                "return PercyDOM.serialize(" + optionsJson.toString() + ")"
+            );
+        } catch (Exception e) {
+            log("Failed to process cross-origin frame " + finalFrameUrl + ": " + e.getMessage(), "error");
+            throw new RuntimeException("Failed to process cross-origin frame " + finalFrameUrl, e);
+        } finally {
+            try {
+                driver.switchTo().defaultContent();
+            } catch (Exception err) {
+                throw new FatalIframeException(
+                    "Could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable.", err
+                );
+            }
+        }
+
+        Map<String, Object> iframeData = new HashMap<>();
+        iframeData.put("percyElementId", percyElementId);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("iframeData", iframeData);
+        result.put("iframeSnapshot", iframeSnapshot);
+        result.put("frameUrl", finalFrameUrl);
+        return result;
+    }
+
     private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
-
+        try {
+            String pageOrigin = getOrigin(driver.getCurrentUrl());
+            List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
+            if (!iframes.isEmpty() && !domJs.trim().isEmpty()) {
+                List<Map<String, Object>> processedFrames = new ArrayList<>();
+                for (WebElement frame : iframes) {
+                    String frameSrc = frame.getAttribute("src");
+                    if (isUnsupportedIframeSrc(frameSrc)) {
+                        continue;
+                    }
+                    String frameOrigin;
+                    try {
+                        URI base = new URI(driver.getCurrentUrl());
+                        URI resolved = base.resolve(frameSrc);
+                        frameOrigin = getOrigin(resolved.toString());
+                    } catch (Exception e) {
+                        log("Skipping iframe \"" + frameSrc + "\": " + e.getMessage(), "debug");
+                        continue;
+                    }
+                    if (frameOrigin.equals(pageOrigin)) {
+                        continue;
+                    }
+                    try {
+                        Map<String, Object> result = processFrame(frame, options);
+                        if (result != null) {
+                            processedFrames.add(result);
+                        }
+                    } catch (FatalIframeException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        log("Skipping frame \"" + frameSrc + "\" due to error: " + e.getMessage(), "debug");
+                    }
+                }
+                if (!processedFrames.isEmpty()) {
+                    mutableSnapshot.put("corsIframes", processedFrames);
+                }
+            }
+        } catch (FatalIframeException e) {
+            throw e;
+        } catch (Exception e) {
+            log("Failed to process cross-origin iframes: " + e.getMessage(), "debug");
+        }
         return mutableSnapshot;
     }
 
@@ -530,39 +729,6 @@ public class Percy {
                 ignoredElementsArray.add(elementId);
         }
         return ignoredElementsArray;
-    }
-
-    // Get widths for multi DOM
-    private List<Integer> getWidthsForMultiDom(Map<String, Object> options) {
-        List<Integer> widths;
-        if (options.containsKey("widths") && options.get("widths") instanceof List<?>) {
-            widths = (List<Integer>) options.get("widths");
-        } else {
-            widths = new ArrayList<>();
-        }
-        // Create a Set to avoid duplicates
-        Set<Integer> allWidths = new HashSet<>();
-
-        JSONArray mobileWidths = eligibleWidths.getJSONArray("mobile");
-        for (int i = 0; i < mobileWidths.length(); i++) {
-            allWidths.add(mobileWidths.getInt(i));
-        }
-
-        // Add input widths if provided
-        if (widths.size() != 0) {
-            for (int width : widths) {
-                allWidths.add(width);
-            }
-        } else {
-            // Add config widths if no input widths are provided
-            JSONArray configWidths = eligibleWidths.getJSONArray("config");
-            for (int i = 0; i < configWidths.length(); i++) {
-                allWidths.add(configWidths.getInt(i));
-            }
-        }
-
-        // Convert Set back to List
-        return allWidths.stream().collect(Collectors.toList());
     }
 
     // Method to check if ChromeDriver supports CDP by checking the existence of executeCdpCommand
@@ -593,56 +759,138 @@ public class Percy {
             log("Resizing using CDP failed, falling back to driver for width " + width + ": " + e.getMessage(), "debug");
             driver.manage().window().setSize(new Dimension(width, height));
         }
-
         // Wait for window resize event using WebDriverWait
         try {
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(1));
-            wait.until((ExpectedCondition<Boolean>) d ->
-                    (long) ((JavascriptExecutor) d).executeScript("return window.resizeCount") == resizeCount);
+            wait.until((ExpectedCondition<Boolean>) d -> {
+                Object resizeCountObj = ((JavascriptExecutor) d).executeScript("return window.resizeCount");
+                if (resizeCountObj == null) {
+                    return false;
+                }
+                return (resizeCountObj instanceof Number) && ((Number) resizeCountObj).longValue() == resizeCount;
+            });
         } catch (WebDriverException e) {
             log("Timed out waiting for window resize event for width " + width, "debug");
         }
     }
 
-    // Capture responsive DOM for different widths
+    private List<Integer> extractResponsiveWidths(Map<String, Object> options) {
+        if (options == null) {
+            return null;
+        }
+        Object widthsOption = options.get("widths");
+        if (!(widthsOption instanceof List<?>)) {
+            return null;
+        }
+        List<?> rawWidths = (List<?>) widthsOption;
+        List<Integer> coercedWidths = new ArrayList<>();
+        for (Object value : rawWidths) {
+            if (value instanceof Number) {
+                coercedWidths.add(((Number) value).intValue());
+            } else if (value instanceof String) {
+                try {
+                    coercedWidths.add(Integer.parseInt((String) value));
+                } catch (NumberFormatException ignore) {
+                }
+            }
+        }
+        return coercedWidths.isEmpty() ? null : coercedWidths;
+    }
+
+    // Resolves final viewport height for responsive capture using minHeight config when enabled.
+    private int resolveResponsiveTargetHeight(Map<String, Object> options, int currentHeight) {
+        if (!PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
+            log("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is disabled, using current window height: " + currentHeight, "debug");
+            return currentHeight;
+        }
+
+        Integer minHeight = resolveConfiguredMinHeight(options);
+        if (minHeight == null) {
+            log("minHeight not found in options or cliConfig, using current window height: " + currentHeight, "debug");
+            return currentHeight;
+        }
+
+        return minHeight;
+    }
+
+    // Reads minHeight from snapshot options first, then falls back to CLI snapshot config.
+    private Integer resolveConfiguredMinHeight(Map<String, Object> options) {
+        Object minHeightObj = options.get("minHeight");
+        if (minHeightObj == null && cliConfig != null && cliConfig.has("snapshot")) {
+            JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
+            if (snapshotConfig.has("minHeight")) {
+                minHeightObj = snapshotConfig.getInt("minHeight");
+            }
+        }
+
+        if (minHeightObj == null) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(minHeightObj.toString());
+        } catch (NumberFormatException e) {
+            log("Invalid minHeight value " + minHeightObj + "; expected integer, using current window height instead.", "debug");
+            return null;
+        }
+    }
+
+
+
     public List<Map<String, Object>> captureResponsiveDom(WebDriver driver, Set<Cookie> cookies, Map<String, Object> options) {
-        List<Integer> widths = getWidthsForMultiDom(options);
-
+        List<Integer> responsiveWidths = extractResponsiveWidths(options);
+        List<Map<String, Object>> widths = getResponsiveWidths(responsiveWidths);
         List<Map<String, Object>> domSnapshots = new ArrayList<>();
-
         Dimension windowSize = driver.manage().window().getSize();
         int currentWidth = windowSize.getWidth();
         int currentHeight = windowSize.getHeight();
         int lastWindowWidth = currentWidth;
+        int lastWindowHeight = currentHeight;
         int resizeCount = 0;
         JavascriptExecutor jse = (JavascriptExecutor) driver;
-
-        // Inject JS to count window resize events
         jse.executeScript("PercyDOM.waitForResize()");
-
-        for (int width : widths) {
-            if (lastWindowWidth != width) {
-                resizeCount++;
-                changeWindowDimensionAndWait(driver, width, currentHeight, resizeCount);
-                lastWindowWidth = width;
+        int targetHeight = resolveResponsiveTargetHeight(options, currentHeight);
+        try {
+            for (Map<String, Object> widthMap : widths) {
+                Object widthObj = widthMap.get("width");
+                if (!(widthObj instanceof Number)) {
+                    continue;
+                }
+                int width = ((Number) widthObj).intValue();
+                Object heightObj = widthMap.get("height");
+                log("Processing responsive snapshot for width " + width + " with target height " + targetHeight + ", height obj: " + heightObj, "debug");
+                int heightForWidth = (heightObj instanceof Number) ? ((Number) heightObj).intValue() : targetHeight;
+                log("Final height: " + heightForWidth, "debug");
+                if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {
+                    resizeCount++;
+                    log("Resizing window to width " + width + " and height " + heightForWidth, "debug");
+                    changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
+                    lastWindowWidth = width;
+                    lastWindowHeight = heightForWidth;
+                }
+                if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
+                    driver.navigate().refresh();
+                    jse.executeScript(fetchPercyDOM());
+                    jse.executeScript("PercyDOM.waitForResize()");
+                    resizeCount = 0;
+                }
+                try {
+                    if (RESPONSIVE_CAPTURE_SLEEP_TIME != null && !RESPONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
+                        int sleepTime = Integer.parseInt(RESPONSIVE_CAPTURE_SLEEP_TIME);
+                        Thread.sleep(sleepTime * 1000L);
+                    }
+                } catch (InterruptedException | NumberFormatException ignored) {
+                }
+                Map<String, Object> domSnapshot = getSerializedDOM(jse, cookies, options);
+                domSnapshot.put("width", width);
+                domSnapshots.add(domSnapshot);
             }
-
-            try {
-                int sleepTime = Integer.parseInt(RESONSIVE_CAPTURE_SLEEP_TIME);
-                Thread.sleep(sleepTime * 1000); // Sleep if needed
-            } catch (InterruptedException | NumberFormatException ignored) {
-            }
-            Map<String, Object> domSnapshot = getSerializedDOM(jse, cookies, options);
-            domSnapshot.put("width", width);
-            domSnapshots.add(domSnapshot);
+        } finally {
+            changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
         }
-
-        // Revert to the original window size
-        changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
-
         return domSnapshots;
     }
-
+    
     protected static void log(String message) {
         log(message, "info");
     }

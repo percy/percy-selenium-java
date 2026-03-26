@@ -4,6 +4,6 @@
     "test": "npx percy exec --testing -- mvn test"
   },
   "devDependencies": {
-    "@percy/cli": "1.30.9"
+    "@percy/cli": "1.31.10"
   }
 }
