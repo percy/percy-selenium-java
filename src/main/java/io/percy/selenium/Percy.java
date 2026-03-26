@@ -888,7 +888,6 @@ public class Percy {
         } finally {
             changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
         }
-
         return domSnapshots;
     }
     

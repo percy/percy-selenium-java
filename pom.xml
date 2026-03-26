@@ -5,7 +5,7 @@
 
   <groupId>io.percy</groupId>
   <artifactId>percy-java-selenium</artifactId>
-  <version>2.1.2-alpha.0</version>
+  <version>4.28.0</version>
   <packaging>jar</packaging>
 
   <name>${project.groupId}:${project.artifactId}</name>
@@ -32,7 +32,7 @@
     <connection>scm:git:git://github.com/percy/percy-java-selenium.git</connection>
     <developerConnection>scm:git:https://github.com/percy/percy-java-selenium.git</developerConnection>
     <url>https://github.com/percy/percy-java-selenium/tree/master</url>
-    <tag>v2.1.2-alpha.0</tag>
+    <tag>v2.0.0</tag>
   </scm>
 
   <properties>
@@ -45,13 +45,13 @@
     <dependency>
       <groupId>org.seleniumhq.selenium</groupId>
       <artifactId>selenium-java</artifactId>
-      <version>4.5.3</version>
-      <scope>provided</scope>
+      <version>4.15.0</version>
+     
     </dependency>
     <dependency>
       <groupId>org.seleniumhq.selenium</groupId>
       <artifactId>selenium-firefox-driver</artifactId>
-      <version>4.5.3</version>
+      <version>4.15.0</version>
     </dependency>
     <dependency>
       <groupId>org.json</groupId>
@@ -61,8 +61,7 @@
     <dependency>
         <groupId>io.github.bonigarcia</groupId>
         <artifactId>webdrivermanager</artifactId>
-        <version>5.3.2</version>
-        <scope>test</scope>
+        <version>5.6.2</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
