@@ -114,6 +114,12 @@ import java.net.URL;
   }
 
   @Test
+  public void takesSnapshotWithCrossOriginIframe() {
+    driver.get(TEST_URL + "/cors-iframe.html");
+    percy.snapshot("Snapshot with cross-origin iframe");
+  }
+
+  @Test
   public void snapshotALiveHTTPSite() {
     driver.get("http://example.com");
     percy.snapshot("Site served with HTTP");
