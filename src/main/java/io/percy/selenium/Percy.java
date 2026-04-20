@@ -598,6 +598,54 @@ public class Percy {
         return jsBuilder.toString();
     }
 
+    /**
+     * Readiness gate (PER-7348): runs PercyDOM.waitForReady BEFORE serialize.
+     *
+     * Uses executeAsyncScript with a callback signal. The embedded JS checks
+     * typeof PercyDOM.waitForReady === 'function' so older CLI versions that
+     * lack the method are a graceful no-op.
+     *
+     * Readiness config precedence: options["readiness"] > cliConfig.snapshot.readiness
+     * > empty (CLI applies balanced default). "disabled" preset skips the
+     * executeAsyncScript call entirely. Any exception is swallowed at debug level;
+     * serialize still runs.
+     *
+     * @return Readiness diagnostics to attach to the domSnapshot, or null.
+     */
+    protected Object waitForReady(JavascriptExecutor jse, Map<String, Object> options) {
+        Object perSnapshot = options != null ? options.get("readiness") : null;
+        JSONObject readinessConfig;
+        if (perSnapshot instanceof Map) {
+            readinessConfig = new JSONObject((Map<?, ?>) perSnapshot);
+        } else if (perSnapshot instanceof JSONObject) {
+            readinessConfig = (JSONObject) perSnapshot;
+        } else if (cliConfig != null) {
+            JSONObject snapshotConfig = cliConfig.optJSONObject("snapshot");
+            readinessConfig = snapshotConfig == null ? new JSONObject()
+                    : snapshotConfig.optJSONObject("readiness");
+            if (readinessConfig == null) { readinessConfig = new JSONObject(); }
+        } else {
+            readinessConfig = new JSONObject();
+        }
+        if ("disabled".equals(readinessConfig.optString("preset", null))) {
+            return null;
+        }
+        try {
+            String script =
+                "var cfg = " + readinessConfig.toString() + ";"
+                + "var done = arguments[arguments.length - 1];"
+                + "try {"
+                + "  if (typeof PercyDOM !== 'undefined' && typeof PercyDOM.waitForReady === 'function') {"
+                + "    PercyDOM.waitForReady(cfg).then(function(r){ done(r); }).catch(function(){ done(); });"
+                + "  } else { done(); }"
+                + "} catch (e) { done(); }";
+            return jse.executeAsyncScript(script);
+        } catch (Exception e) {
+            log("waitForReady failed, proceeding to serialize: " + e.getMessage(), "debug");
+            return null;
+        }
+    }
+
     static class FatalIframeException extends RuntimeException {
         FatalIframeException(String message, Throwable cause) {
             super(message, cause);
@@ -673,10 +721,18 @@ public class Percy {
         return result;
     }
 
-    private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+    Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+        // Readiness gate before serialize (PER-7348). Graceful on old CLI.
+        Object readinessDiagnostics = waitForReady(jse, options);
+
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
+
+        // Attach readiness diagnostics so the CLI can log timing and pass/fail
+        if (readinessDiagnostics != null) {
+            mutableSnapshot.put("readiness_diagnostics", readinessDiagnostics);
+        }
         try {
             String pageOrigin = getOrigin(driver.getCurrentUrl());
             List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
