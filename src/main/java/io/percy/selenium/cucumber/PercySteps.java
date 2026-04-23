@@ -183,6 +183,49 @@ public class PercySteps {
         regions.add(percy.createRegion(params));
     }
 
+    @Given("I create a Percy ignore region with CSS selector {string} and padding {int}")
+    public void iCreateIgnoreRegionCSSWithPadding(String cssSelector, int padding) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("algorithm", "ignore");
+        params.put("elementCSS", cssSelector);
+        params.put("padding", padding);
+        regions.add(percy.createRegion(params));
+    }
+
+    @Given("I create a Percy ignore region with XPath {string} and padding {int}")
+    public void iCreateIgnoreRegionXPathWithPadding(String xpath, int padding) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("algorithm", "ignore");
+        params.put("elementXpath", xpath);
+        params.put("padding", padding);
+        regions.add(percy.createRegion(params));
+    }
+
+    @Given("I create a Percy consider region with XPath {string}")
+    public void iCreateConsiderRegionXPath(String xpath) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("algorithm", "standard");
+        params.put("elementXpath", xpath);
+        regions.add(percy.createRegion(params));
+    }
+
+    @Given("I create a Percy consider region with XPath {string} and diff sensitivity {int}")
+    public void iCreateConsiderRegionXPathWithSensitivity(String xpath, int sensitivity) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("algorithm", "standard");
+        params.put("elementXpath", xpath);
+        params.put("diffSensitivity", sensitivity);
+        regions.add(percy.createRegion(params));
+    }
+
+    @Given("I create a Percy intelliignore region with XPath {string}")
+    public void iCreateIntelliIgnoreRegionXPath(String xpath) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("algorithm", "intelliignore");
+        params.put("elementXpath", xpath);
+        regions.add(percy.createRegion(params));
+    }
+
     @Given("I clear Percy regions")
     public void iClearPercyRegions() {
         regions.clear();
@@ -250,6 +293,27 @@ public class PercySteps {
     public void iTakeSnapshotWithTestCase(String name, String testCase) {
         Map<String, Object> options = new HashMap<>();
         options.put("testCase", testCase);
+        percy.snapshot(name, options);
+    }
+
+    @When("I take a Percy snapshot named {string} with Shadow DOM disabled")
+    public void iTakeSnapshotWithShadowDomDisabled(String name) {
+        Map<String, Object> options = new HashMap<>();
+        options.put("disableShadowDom", true);
+        percy.snapshot(name, options);
+    }
+
+    @When("I take a Percy snapshot named {string} with responsive capture")
+    public void iTakeSnapshotWithResponsiveCapture(String name) {
+        Map<String, Object> options = new HashMap<>();
+        options.put("responsiveSnapshotCapture", true);
+        percy.snapshot(name, options);
+    }
+
+    @When("I take a Percy snapshot named {string} with sync")
+    public void iTakeSnapshotWithSync(String name) {
+        Map<String, Object> options = new HashMap<>();
+        options.put("sync", true);
         percy.snapshot(name, options);
     }
 
@@ -354,7 +418,11 @@ public class PercySteps {
                 case "enableLayout":
                 case "disableShadowDom":
                 case "responsiveSnapshotCapture":
+                case "sync":
                     options.put(key, Boolean.parseBoolean(value));
+                    break;
+                case "scopeOptions":
+                    options.put(key, new org.json.JSONObject(value).toMap());
                     break;
                 default:
                     options.put(key, value);
