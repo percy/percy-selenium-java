@@ -63,6 +63,8 @@ public class PercySteps {
     private static Percy percy;
     private static List<Map<String, Object>> regions = new ArrayList<>();
 
+    private static final String CUCUMBER_CLIENT_NAME = "percy-cucumber-java-selenium";
+
     /**
      * Set the WebDriver instance for Percy to use.
      * Call this from your Cucumber hooks before using any Percy steps.
@@ -72,6 +74,24 @@ public class PercySteps {
     public static void setDriver(WebDriver webDriver) {
         driver = webDriver;
         percy = new Percy(driver);
+
+        // Identify as Cucumber wrapper in Percy build info
+        String sdkVersion = Percy.getSdkVersion();
+        String cucumberVersion = getCucumberVersion();
+        percy.setClientInfo(
+            CUCUMBER_CLIENT_NAME + "/" + sdkVersion,
+            "cucumber-java/" + cucumberVersion + "; selenium-java"
+        );
+    }
+
+    private static String getCucumberVersion() {
+        try {
+            Package pkg = io.cucumber.java.en.Given.class.getPackage();
+            String version = pkg != null ? pkg.getImplementationVersion() : null;
+            return version != null ? version : "unknown";
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     /**
