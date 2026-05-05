@@ -353,6 +353,18 @@ public class Percy {
 
         Object domSnapshot = null;
 
+        // Merge .percy.yml config options with snapshot options (snapshot options take priority)
+        Map<String, Object> mergedOptions = new HashMap<>();
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
+            for (String key : snapshotConfig.keySet()) {
+                mergedOptions.put(key, snapshotConfig.get(key));
+            }
+        }
+        if (options != null) {
+            mergedOptions.putAll(options);
+        }
+
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(fetchPercyDOM());
@@ -362,10 +374,10 @@ public class Percy {
             } catch(Exception e) {
                 log("Cookie collection failed " + e.getMessage(), "debug");
             }
-            if (isCaptureResponsiveDOM(options)) {
-                domSnapshot = captureResponsiveDom(driver, cookies, options);
+            if (isCaptureResponsiveDOM(mergedOptions)) {
+                domSnapshot = captureResponsiveDom(driver, cookies, mergedOptions);
             } else {
-                domSnapshot = getSerializedDOM(jse, cookies, options);
+                domSnapshot = getSerializedDOM(jse, cookies, mergedOptions);
             }
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.
