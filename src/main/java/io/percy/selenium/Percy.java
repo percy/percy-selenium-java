@@ -721,6 +721,19 @@ public class Percy {
         }
     }
 
+    // Read document.URL inside the current frame context. Used for the post-switch
+    // sanity check to confirm the iframe actually resolved to a navigable URL.
+    // Only treat a String result as the document URL — otherwise return null so
+    // callers fall back to the parent-side `src` value.
+    private String readCurrentFrameUrl() {
+        try {
+            Object u = ((JavascriptExecutor) driver).executeScript("return document.URL");
+            return (u instanceof String) ? (String) u : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // Serialize the current frame context's DOM using PercyDOM.serialize.
     // enableJavaScript=true is forced so PercyDOM.serialize doesn't recurse into
     // nested iframes itself — we drive that recursion explicitly.
@@ -755,6 +768,14 @@ public class Percy {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             // Inject Percy DOM into the cross-origin frame context
             jse.executeScript(domJs);
+            // Post-switch URL re-check: about:blank / data: / javascript: targets
+            // can slip through the parent-side `src` check (e.g. when the iframe
+            // failed to load, or has been navigated by script after attach).
+            String postSwitchUrl = readCurrentFrameUrl();
+            if (postSwitchUrl != null && isUnsupportedIframeSrc(postSwitchUrl)) {
+                log("Skipping iframe after switch: unsupported document.URL \"" + postSwitchUrl + "\"", "debug");
+                return null;
+            }
             // Serialize inside the frame; enableJavaScript=true is required for CORS iframes
             Map<String, Object> iframeOptions = new HashMap<>(options);
             iframeOptions.put("enableJavaScript", true);
@@ -833,29 +854,40 @@ public class Percy {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(domJs);
 
+            // Post-switch URL re-check: this is the only place we know what the
+            // browser actually navigated to. If it's an unsupported scheme,
+            // bail before serializing.
+            String postSwitchUrl = readCurrentFrameUrl();
+            if (postSwitchUrl != null && isUnsupportedIframeSrc(postSwitchUrl)) {
+                log("Skipping iframe after switch: unsupported document.URL \"" + postSwitchUrl + "\"", "debug");
+                return collected;
+            }
+
             Map<String, Object> iframeSnapshot = serializeCurrentFrame(options);
+            String reportedUrl = (postSwitchUrl != null) ? postSwitchUrl : frameSrc;
 
             Map<String, Object> iframeData = new HashMap<>();
             iframeData.put("percyElementId", percyElementId);
             Map<String, Object> entry = new HashMap<>();
             entry.put("iframeData", iframeData);
             entry.put("iframeSnapshot", iframeSnapshot);
-            entry.put("frameUrl", frameSrc);
+            entry.put("frameUrl", reportedUrl);
             collected.add(entry);
 
             // Descend into further cross-origin iframes nested inside this one.
             // Same-origin descendants are already inlined as srcdoc by PercyDOM.
             if (depth < maxFrameDepth) {
-                String currentOrigin = getOrigin(frameSrc);
+                String currentOrigin = getOrigin(reportedUrl);
                 List<WebElement> childIframes;
                 try {
                     childIframes = driver.findElements(By.tagName("iframe"));
                 } catch (Exception e) {
-                    log("Could not enumerate nested iframes in " + frameSrc + ": " + e.getMessage(), "debug");
+                    log("Could not enumerate nested iframes in " + reportedUrl + ": " + e.getMessage(), "debug");
                     childIframes = Collections.emptyList();
                 }
                 Set<String> nextAncestors = new HashSet<>(ancestorUrls == null ? Collections.emptySet() : ancestorUrls);
                 if (frameSrc != null) nextAncestors.add(frameSrc);
+                if (reportedUrl != null) nextAncestors.add(reportedUrl);
 
                 for (WebElement child : childIframes) {
                     String childSrc;
@@ -871,7 +903,7 @@ public class Percy {
                     }
                     String childOrigin;
                     try {
-                        URI base = new URI(frameSrc);
+                        URI base = new URI(reportedUrl);
                         URI resolved = base.resolve(childSrc);
                         childOrigin = getOrigin(resolved.toString());
                     } catch (Exception e) {
