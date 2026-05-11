@@ -655,6 +655,17 @@ public class Percy {
         return DEFAULT_MAX_FRAME_DEPTH;
     }
 
+    // Probe a child iframe element for `data-percy-ignore`. Selenium's
+    // getAttribute returns "" for boolean attributes with no value; treat
+    // any non-null result as a positive hit.
+    private boolean childHasDataPercyIgnore(WebElement iframe) {
+        try {
+            return iframe.getAttribute("data-percy-ignore") != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // Serialize the current frame context's DOM using PercyDOM.serialize.
     // enableJavaScript=true is forced so PercyDOM.serialize doesn't recurse into
     // nested iframes itself — we drive that recursion explicitly.
@@ -793,6 +804,10 @@ public class Percy {
                     String childSrc;
                     try { childSrc = child.getAttribute("src"); } catch (Exception e) { continue; }
                     if (isUnsupportedIframeSrc(childSrc)) continue;
+                    if (childHasDataPercyIgnore(child)) {
+                        log("Skipping iframe marked with data-percy-ignore: " + childSrc, "debug");
+                        continue;
+                    }
                     String childOrigin;
                     try {
                         URI base = new URI(frameSrc);
@@ -850,6 +865,10 @@ public class Percy {
                     String frameSrc;
                     try { frameSrc = frame.getAttribute("src"); } catch (Exception e) { continue; }
                     if (isUnsupportedIframeSrc(frameSrc)) continue;
+                    if (childHasDataPercyIgnore(frame)) {
+                        log("Skipping iframe marked with data-percy-ignore: " + frameSrc, "debug");
+                        continue;
+                    }
                     String frameOrigin;
                     try {
                         URI base = new URI(pageUrl);
