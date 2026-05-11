@@ -638,6 +638,61 @@ public class Percy {
         return depth;
     }
 
+    // Coerce an arbitrary user-provided selector list into a sanitized List<String>.
+    private static List<String> normalizeIgnoreSelectors(Object input) {
+        List<String> result = new ArrayList<>();
+        if (input == null) return result;
+        if (input instanceof List<?>) {
+            for (Object o : (List<?>) input) {
+                if (o instanceof String) {
+                    String s = ((String) o).trim();
+                    if (!s.isEmpty()) result.add(s);
+                }
+            }
+        } else if (input instanceof String) {
+            String s = ((String) input).trim();
+            if (!s.isEmpty()) result.add(s);
+        }
+        return result;
+    }
+
+    private List<String> resolveIgnoreSelectors(Map<String, Object> options) {
+        if (options != null && options.containsKey("ignoreIframeSelectors")) {
+            return normalizeIgnoreSelectors(options.get("ignoreIframeSelectors"));
+        }
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snap = cliConfig.getJSONObject("snapshot");
+            if (snap.has("ignoreIframeSelectors") && !snap.isNull("ignoreIframeSelectors")) {
+                JSONArray arr = snap.optJSONArray("ignoreIframeSelectors");
+                if (arr != null) {
+                    List<Object> out = new ArrayList<>();
+                    for (int i = 0; i < arr.length(); i++) out.add(arr.opt(i));
+                    return normalizeIgnoreSelectors(out);
+                }
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    // True if the iframe element matches any of the user-provided ignore selectors.
+    // Selector matching is performed in-browser via Element.matches so any CSS
+    // selector the browser supports is valid; invalid selectors are tolerated.
+    private boolean iframeMatchesIgnoreSelector(WebElement iframe, List<String> selectors) {
+        if (selectors == null || selectors.isEmpty()) return false;
+        try {
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            JSONArray sel = new JSONArray(selectors);
+            String script = "var el = arguments[0]; var selectors = " + sel.toString() + ";"
+                + "for (var i = 0; i < selectors.length; i++) {"
+                + "  try { if (el.matches(selectors[i])) return true; } catch (e) {}"
+                + "} return false;";
+            Object res = jse.executeScript(script, iframe);
+            return res instanceof Boolean && (Boolean) res;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private int resolveMaxFrameDepth(Map<String, Object> options) {
         Object override = options == null ? null : options.get("maxIframeDepth");
         if (override instanceof Number) {
@@ -749,6 +804,8 @@ public class Percy {
         @SuppressWarnings("unchecked")
         Map<String, Object> options = (Map<String, Object>) ctx.get("options");
         int maxFrameDepth = (int) ctx.get("maxFrameDepth");
+        @SuppressWarnings("unchecked")
+        List<String> ignoreSelectors = (List<String>) ctx.get("ignoreSelectors");
 
         String frameSrc = frameElement.getAttribute("src");
         String percyElementId = frameElement.getAttribute("data-percy-element-id");
@@ -808,6 +865,10 @@ public class Percy {
                         log("Skipping iframe marked with data-percy-ignore: " + childSrc, "debug");
                         continue;
                     }
+                    if (iframeMatchesIgnoreSelector(child, ignoreSelectors)) {
+                        log("Skipping iframe matching ignoreIframeSelectors: " + childSrc, "debug");
+                        continue;
+                    }
                     String childOrigin;
                     try {
                         URI base = new URI(frameSrc);
@@ -855,10 +916,12 @@ public class Percy {
             List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
             if (!iframes.isEmpty() && !domJs.trim().isEmpty()) {
                 int maxFrameDepth = resolveMaxFrameDepth(options);
+                List<String> ignoreSelectors = resolveIgnoreSelectors(options);
 
                 Map<String, Object> ctx = new HashMap<>();
                 ctx.put("options", options);
                 ctx.put("maxFrameDepth", maxFrameDepth);
+                ctx.put("ignoreSelectors", ignoreSelectors);
 
                 List<Map<String, Object>> processedFrames = new ArrayList<>();
                 for (WebElement frame : iframes) {
@@ -867,6 +930,10 @@ public class Percy {
                     if (isUnsupportedIframeSrc(frameSrc)) continue;
                     if (childHasDataPercyIgnore(frame)) {
                         log("Skipping iframe marked with data-percy-ignore: " + frameSrc, "debug");
+                        continue;
+                    }
+                    if (iframeMatchesIgnoreSelector(frame, ignoreSelectors)) {
+                        log("Skipping iframe matching ignoreIframeSelectors: " + frameSrc, "debug");
                         continue;
                     }
                     String frameOrigin;
