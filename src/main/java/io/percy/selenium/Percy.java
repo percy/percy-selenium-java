@@ -604,6 +604,12 @@ public class Percy {
         }
     }
 
+    // Default maximum nesting depth for cross-origin iframe capture. Mirrors the
+    // canonical Percy SDK behaviour — depth 1 is a top-level iframe.
+    private static final int DEFAULT_MAX_FRAME_DEPTH = 5;
+    private static final int MIN_FRAME_DEPTH = 1;
+    private static final int MAX_FRAME_DEPTH_CAP = 10;
+
     private boolean isUnsupportedIframeSrc(String src) {
         return src == null || src.isEmpty() ||
                src.equals("about:blank") ||
@@ -612,7 +618,7 @@ public class Percy {
                src.startsWith("vbscript:");
     }
 
-    private String getOrigin(String url) {
+    private static String getOrigin(String url) {
         try {
             URI uri = new URI(url);
             String scheme = uri.getScheme();
@@ -622,6 +628,46 @@ public class Percy {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    // Clamp the configured frame depth to a sane range. Negative or
+    // unreasonably large values fall back to the default.
+    private static int clampFrameDepth(int depth) {
+        if (depth < MIN_FRAME_DEPTH) return DEFAULT_MAX_FRAME_DEPTH;
+        if (depth > MAX_FRAME_DEPTH_CAP) return MAX_FRAME_DEPTH_CAP;
+        return depth;
+    }
+
+    private int resolveMaxFrameDepth(Map<String, Object> options) {
+        Object override = options == null ? null : options.get("maxIframeDepth");
+        if (override instanceof Number) {
+            return clampFrameDepth(((Number) override).intValue());
+        }
+        if (override instanceof String) {
+            try { return clampFrameDepth(Integer.parseInt((String) override)); } catch (NumberFormatException ignore) {}
+        }
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snap = cliConfig.getJSONObject("snapshot");
+            if (snap.has("maxIframeDepth") && !snap.isNull("maxIframeDepth")) {
+                return clampFrameDepth(snap.optInt("maxIframeDepth", DEFAULT_MAX_FRAME_DEPTH));
+            }
+        }
+        return DEFAULT_MAX_FRAME_DEPTH;
+    }
+
+    // Serialize the current frame context's DOM using PercyDOM.serialize.
+    // enableJavaScript=true is forced so PercyDOM.serialize doesn't recurse into
+    // nested iframes itself — we drive that recursion explicitly.
+    private Map<String, Object> serializeCurrentFrame(Map<String, Object> options) {
+        JavascriptExecutor jse = (JavascriptExecutor) driver;
+        Map<String, Object> iframeOptions = new HashMap<>(options == null ? Collections.emptyMap() : options);
+        iframeOptions.put("enableJavaScript", true);
+        JSONObject optionsJson = new JSONObject(iframeOptions);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> snapshot = (Map<String, Object>) jse.executeScript(
+            "return PercyDOM.serialize(" + optionsJson.toString() + ")"
+        );
+        return snapshot;
     }
 
     private Map<String, Object> processFrame(WebElement frameElement, Map<String, Object> options) {
@@ -673,37 +719,153 @@ public class Percy {
         return result;
     }
 
+    // Recursively process a cross-origin iframe tree. From the current driver
+    // frame context, switch into `frameElement`, capture its DOM, enumerate
+    // further cross-origin iframes nested inside it, and recurse. Steps back
+    // to the parent frame on exit so the caller can continue iterating siblings.
+    //
+    // Bounded by `maxFrameDepth` to stop runaway recursion when pages link to
+    // each other. `ancestorUrls` tracks parent frame URLs — if the current
+    // frame's URL is already in the chain we treat it as a cycle and stop
+    // descending. Compares nested-frame origin against the IMMEDIATE PARENT
+    // origin, not the top page origin.
+    private List<Map<String, Object>> processFrameTree(
+        WebElement frameElement,
+        int depth,
+        Set<String> ancestorUrls,
+        Map<String, Object> ctx
+    ) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> options = (Map<String, Object>) ctx.get("options");
+        int maxFrameDepth = (int) ctx.get("maxFrameDepth");
+
+        String frameSrc = frameElement.getAttribute("src");
+        String percyElementId = frameElement.getAttribute("data-percy-element-id");
+
+        List<Map<String, Object>> collected = new ArrayList<>();
+        if (depth > maxFrameDepth) {
+            log("Reached max iframe nesting depth (" + maxFrameDepth + "); stopping at " + frameSrc, "debug");
+            return collected;
+        }
+        if (ancestorUrls != null && frameSrc != null && ancestorUrls.contains(frameSrc)) {
+            log("Skipping cyclic iframe (" + frameSrc + " appears in ancestor chain)", "debug");
+            return collected;
+        }
+        if (percyElementId == null || percyElementId.isEmpty()) {
+            log("Skipping cross-origin iframe without data-percy-element-id: " + frameSrc, "debug");
+            return collected;
+        }
+
+        boolean switchedIn = false;
+        try {
+            log("Processing cross-origin iframe (depth " + depth + "): " + frameSrc, "debug");
+            driver.switchTo().frame(frameElement);
+            switchedIn = true;
+
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            jse.executeScript(domJs);
+
+            Map<String, Object> iframeSnapshot = serializeCurrentFrame(options);
+
+            Map<String, Object> iframeData = new HashMap<>();
+            iframeData.put("percyElementId", percyElementId);
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("iframeData", iframeData);
+            entry.put("iframeSnapshot", iframeSnapshot);
+            entry.put("frameUrl", frameSrc);
+            collected.add(entry);
+
+            // Descend into further cross-origin iframes nested inside this one.
+            // Same-origin descendants are already inlined as srcdoc by PercyDOM.
+            if (depth < maxFrameDepth) {
+                String currentOrigin = getOrigin(frameSrc);
+                List<WebElement> childIframes;
+                try {
+                    childIframes = driver.findElements(By.tagName("iframe"));
+                } catch (Exception e) {
+                    log("Could not enumerate nested iframes in " + frameSrc + ": " + e.getMessage(), "debug");
+                    childIframes = Collections.emptyList();
+                }
+                Set<String> nextAncestors = new HashSet<>(ancestorUrls == null ? Collections.emptySet() : ancestorUrls);
+                if (frameSrc != null) nextAncestors.add(frameSrc);
+
+                for (WebElement child : childIframes) {
+                    String childSrc;
+                    try { childSrc = child.getAttribute("src"); } catch (Exception e) { continue; }
+                    if (isUnsupportedIframeSrc(childSrc)) continue;
+                    String childOrigin;
+                    try {
+                        URI base = new URI(frameSrc);
+                        URI resolved = base.resolve(childSrc);
+                        childOrigin = getOrigin(resolved.toString());
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    // Compare to the IMMEDIATE PARENT origin, not the page origin.
+                    if (childOrigin.equals(currentOrigin)) continue;
+
+                    try {
+                        List<Map<String, Object>> nested = processFrameTree(child, depth + 1, nextAncestors, ctx);
+                        if (!nested.isEmpty()) collected.addAll(nested);
+                    } catch (FatalIframeException fatal) {
+                        throw fatal;
+                    } catch (Exception e) {
+                        log("Skipping nested iframe \"" + childSrc + "\" due to error: " + e.getMessage(), "debug");
+                    }
+                }
+            }
+            return collected;
+        } catch (Exception e) {
+            log("Failed to process cross-origin iframe " + frameSrc + ": " + e.getMessage(), "warn");
+            return collected;
+        } finally {
+            if (switchedIn) {
+                try {
+                    driver.switchTo().parentFrame();
+                } catch (Exception parentErr) {
+                    log("Failed to switch back to parent frame: " + parentErr.getMessage(), "warn");
+                    try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
+                }
+            }
+        }
+    }
+
     private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
         try {
-            String pageOrigin = getOrigin(driver.getCurrentUrl());
+            String pageUrl = driver.getCurrentUrl();
+            String pageOrigin = getOrigin(pageUrl);
             List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
             if (!iframes.isEmpty() && !domJs.trim().isEmpty()) {
+                int maxFrameDepth = resolveMaxFrameDepth(options);
+
+                Map<String, Object> ctx = new HashMap<>();
+                ctx.put("options", options);
+                ctx.put("maxFrameDepth", maxFrameDepth);
+
                 List<Map<String, Object>> processedFrames = new ArrayList<>();
                 for (WebElement frame : iframes) {
-                    String frameSrc = frame.getAttribute("src");
-                    if (isUnsupportedIframeSrc(frameSrc)) {
-                        continue;
-                    }
+                    String frameSrc;
+                    try { frameSrc = frame.getAttribute("src"); } catch (Exception e) { continue; }
+                    if (isUnsupportedIframeSrc(frameSrc)) continue;
                     String frameOrigin;
                     try {
-                        URI base = new URI(driver.getCurrentUrl());
+                        URI base = new URI(pageUrl);
                         URI resolved = base.resolve(frameSrc);
                         frameOrigin = getOrigin(resolved.toString());
                     } catch (Exception e) {
                         log("Skipping iframe \"" + frameSrc + "\": " + e.getMessage(), "debug");
                         continue;
                     }
-                    if (frameOrigin.equals(pageOrigin)) {
-                        continue;
-                    }
+                    if (frameOrigin.equals(pageOrigin)) continue;
+
+                    Set<String> ancestors = new HashSet<>();
+                    if (pageUrl != null) ancestors.add(pageUrl);
                     try {
-                        Map<String, Object> result = processFrame(frame, options);
-                        if (result != null) {
-                            processedFrames.add(result);
-                        }
+                        List<Map<String, Object>> nested = processFrameTree(frame, 1, ancestors, ctx);
+                        if (!nested.isEmpty()) processedFrames.addAll(nested);
                     } catch (FatalIframeException e) {
                         throw e;
                     } catch (Exception e) {
