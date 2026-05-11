@@ -604,6 +604,17 @@ public class Percy {
         }
     }
 
+    // Signals that the driver lost its frame context mid-recursion. Any iframes
+    // captured before the failure are attached as `partialCapture` so the top-
+    // level caller can still salvage them instead of throwing away progress.
+    static class PercyContextLostException extends RuntimeException {
+        public List<Map<String, Object>> partialCapture;
+        PercyContextLostException(String message, Throwable cause, List<Map<String, Object>> partialCapture) {
+            super(message, cause);
+            this.partialCapture = partialCapture;
+        }
+    }
+
     // Default maximum nesting depth for cross-origin iframe capture. Mirrors the
     // canonical Percy SDK behaviour — depth 1 is a top-level iframe.
     private static final int DEFAULT_MAX_FRAME_DEPTH = 5;
@@ -915,6 +926,15 @@ public class Percy {
                     try {
                         List<Map<String, Object>> nested = processFrameTree(child, depth + 1, nextAncestors, ctx);
                         if (!nested.isEmpty()) collected.addAll(nested);
+                    } catch (PercyContextLostException ctxLost) {
+                        // Merge any partial capture from the inner level into ours before
+                        // propagating, so the top-level caller can recover everything
+                        // that was successfully serialized prior to the failure.
+                        if (ctxLost.partialCapture != null && !ctxLost.partialCapture.isEmpty()) {
+                            collected.addAll(ctxLost.partialCapture);
+                        }
+                        ctxLost.partialCapture = collected;
+                        throw ctxLost;
                     } catch (FatalIframeException fatal) {
                         throw fatal;
                     } catch (Exception e) {
@@ -923,16 +943,30 @@ public class Percy {
                 }
             }
             return collected;
+        } catch (PercyContextLostException ctxLost) {
+            throw ctxLost;
         } catch (Exception e) {
             log("Failed to process cross-origin iframe " + frameSrc + ": " + e.getMessage(), "warn");
             return collected;
         } finally {
             if (switchedIn) {
+                // Step up exactly one level so an outer recursion continues from
+                // its own context. If parentFrame fails we have no reliable way
+                // to land in the correct parent — fall back to default content
+                // and signal that the rest of the sibling enumeration would be
+                // unreliable. Partial capture is propagated via the exception.
                 try {
                     driver.switchTo().parentFrame();
                 } catch (Exception parentErr) {
                     log("Failed to switch back to parent frame: " + parentErr.getMessage(), "warn");
                     try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
+                    if (depth > 1) {
+                        throw new PercyContextLostException(
+                            "Lost parent frame context: " + parentErr.getMessage(),
+                            parentErr,
+                            new ArrayList<>(collected)
+                        );
+                    }
                 }
             }
         }
@@ -984,6 +1018,14 @@ public class Percy {
                     try {
                         List<Map<String, Object>> nested = processFrameTree(frame, 1, ancestors, ctx);
                         if (!nested.isEmpty()) processedFrames.addAll(nested);
+                    } catch (PercyContextLostException ctxLost) {
+                        log("Aborting further nested CORS capture due to lost frame context", "warn");
+                        if (ctxLost.partialCapture != null && !ctxLost.partialCapture.isEmpty()) {
+                            processedFrames.addAll(ctxLost.partialCapture);
+                        }
+                        // Try to ensure we're back at the top before bailing out of the loop.
+                        try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
+                        break;
                     } catch (FatalIframeException e) {
                         throw e;
                     } catch (Exception e) {
