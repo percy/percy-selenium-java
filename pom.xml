@@ -87,6 +87,19 @@
       <version>3.12.4</version>
       <scope>test</scope>
     </dependency>
+    <!-- Cucumber (optional - for BDD step definitions) -->
+    <dependency>
+      <groupId>io.cucumber</groupId>
+      <artifactId>cucumber-java</artifactId>
+      <version>7.15.0</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cucumber</groupId>
+      <artifactId>cucumber-junit-platform-engine</artifactId>
+      <version>7.15.0</version>
+      <scope>test</scope>
+    </dependency>
 
   </dependencies>
 
