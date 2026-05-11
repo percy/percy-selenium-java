@@ -976,6 +976,11 @@ public class Percy {
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
+
+        // Expose closed shadow roots via CDP (Chromium only) so PercyDOM.serialize
+        // can pierce them through the WeakMap it reads. Non-fatal — skip on errors.
+        try { exposeClosedShadowRoots(driver); } catch (Exception ignore) {}
+
         try {
             String pageUrl = driver.getCurrentUrl();
             String pageOrigin = getOrigin(pageUrl);
@@ -1042,6 +1047,99 @@ public class Percy {
             log("Failed to process cross-origin iframes: " + e.getMessage(), "debug");
         }
         return mutableSnapshot;
+    }
+
+    // Discover closed shadow roots via CDP and expose them on a window-bound
+    // WeakMap that PercyDOM.serialize reads to pierce closed shadow DOM. This is
+    // Chromium-only — wrapped in try/catch so other browsers (or a missing
+    // executeCdpCommand) fall through silently. Three CDP calls per pair:
+    // DOM.getDocument (depth=-1, pierce=true) to discover, then DOM.resolveNode
+    // for host + shadow, then Runtime.callFunctionOn to write the pair into
+    // the WeakMap on the page.
+    @SuppressWarnings("unchecked")
+    private void exposeClosedShadowRoots(WebDriver driver) {
+        if (!(driver instanceof ChromeDriver)) return;
+        ChromeDriver chrome;
+        try { chrome = (ChromeDriver) driver; } catch (ClassCastException e) { return; }
+        try {
+            chrome.executeCdpCommand("DOM.enable", new HashMap<>());
+            Map<String, Object> getDocParams = new HashMap<>();
+            getDocParams.put("depth", -1);
+            getDocParams.put("pierce", true);
+            Map<String, Object> doc = chrome.executeCdpCommand("DOM.getDocument", getDocParams);
+            if (doc == null) return;
+            Object rootObj = doc.get("root");
+            if (!(rootObj instanceof Map)) return;
+            List<Map<String, Object>> closedPairs = new ArrayList<>();
+            collectClosedShadowPairs((Map<String, Object>) rootObj, closedPairs);
+            if (closedPairs.isEmpty()) return;
+
+            log("Found " + closedPairs.size() + " closed shadow root(s), exposing via CDP", "debug");
+
+            ((JavascriptExecutor) chrome).executeScript(
+                "window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap();"
+            );
+
+            for (Map<String, Object> pair : closedPairs) {
+                try {
+                    Map<String, Object> hostParams = new HashMap<>();
+                    hostParams.put("backendNodeId", pair.get("hostBackendNodeId"));
+                    Map<String, Object> hostRes = chrome.executeCdpCommand("DOM.resolveNode", hostParams);
+                    Map<String, Object> shadowParams = new HashMap<>();
+                    shadowParams.put("backendNodeId", pair.get("shadowBackendNodeId"));
+                    Map<String, Object> shadowRes = chrome.executeCdpCommand("DOM.resolveNode", shadowParams);
+                    if (hostRes == null || shadowRes == null) continue;
+                    Object hostObj = hostRes.get("object");
+                    Object shadowObj = shadowRes.get("object");
+                    if (!(hostObj instanceof Map) || !(shadowObj instanceof Map)) continue;
+                    Object hostObjectId = ((Map<String, Object>) hostObj).get("objectId");
+                    Object shadowObjectId = ((Map<String, Object>) shadowObj).get("objectId");
+                    if (hostObjectId == null || shadowObjectId == null) continue;
+                    Map<String, Object> callParams = new HashMap<>();
+                    callParams.put("functionDeclaration",
+                        "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }");
+                    callParams.put("objectId", hostObjectId);
+                    List<Map<String, Object>> args = new ArrayList<>();
+                    Map<String, Object> a = new HashMap<>();
+                    a.put("objectId", shadowObjectId);
+                    args.add(a);
+                    callParams.put("arguments", args);
+                    chrome.executeCdpCommand("Runtime.callFunctionOn", callParams);
+                } catch (Exception perPair) {
+                    log("Failed to expose a closed shadow root: " + perPair.getMessage(), "debug");
+                }
+            }
+        } catch (Exception ex) {
+            log("Could not expose closed shadow roots via CDP: " + ex.getMessage(), "debug");
+        }
+    }
+
+    // Walk the CDP DOM tree looking for closed shadow roots. Skips nodes that
+    // are themselves child-frame documents — cross-frame closed shadow roots
+    // are not supported (different execution context, no WeakMap there).
+    @SuppressWarnings("unchecked")
+    private static void collectClosedShadowPairs(Map<String, Object> node, List<Map<String, Object>> out) {
+        if (node.containsKey("contentDocument")) return;
+        Object srs = node.get("shadowRoots");
+        if (srs instanceof List<?>) {
+            for (Object sr : (List<?>) srs) {
+                if (!(sr instanceof Map)) continue;
+                Map<String, Object> srMap = (Map<String, Object>) sr;
+                if ("closed".equals(srMap.get("shadowRootType"))) {
+                    Map<String, Object> pair = new HashMap<>();
+                    pair.put("hostBackendNodeId", node.get("backendNodeId"));
+                    pair.put("shadowBackendNodeId", srMap.get("backendNodeId"));
+                    out.add(pair);
+                }
+                collectClosedShadowPairs(srMap, out);
+            }
+        }
+        Object children = node.get("children");
+        if (children instanceof List<?>) {
+            for (Object child : (List<?>) children) {
+                if (child instanceof Map) collectClosedShadowPairs((Map<String, Object>) child, out);
+            }
+        }
     }
 
     private List<String> getElementIdFromElement(List<RemoteWebElement> elements) {
