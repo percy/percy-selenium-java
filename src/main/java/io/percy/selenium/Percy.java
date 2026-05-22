@@ -339,8 +339,11 @@ public class Percy {
 
         boolean responsiveSnapshotCaptureCLI = false;
         if (eligibleWidths == null) { return false; }
-        if (cliConfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
-            responsiveSnapshotCaptureCLI = cliConfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snapshotCfg = cliConfig.getJSONObject("snapshot");
+            if (snapshotCfg.has("responsiveSnapshotCapture") && !snapshotCfg.isNull("responsiveSnapshotCapture")) {
+                responsiveSnapshotCaptureCLI = snapshotCfg.getBoolean("responsiveSnapshotCapture");
+            }
         }
         Object responsiveSnapshotCaptureSDK = options.get("responsiveSnapshotCapture");
 
@@ -973,7 +976,13 @@ public class Percy {
     }
 
     private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
-        Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
+        Object raw = jse.executeScript(buildSnapshotJS(options));
+        if (!(raw instanceof Map)) {
+            throw new RuntimeException("PercyDOM.serialize returned null or non-object; "
+                + "the @percy/dom script likely failed to load. Aborting snapshot.");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> domSnapshot = (Map<String, Object>) raw;
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
 
@@ -1061,8 +1070,10 @@ public class Percy {
         if (!(driver instanceof ChromeDriver)) return;
         ChromeDriver chrome;
         try { chrome = (ChromeDriver) driver; } catch (ClassCastException e) { return; }
+        boolean domEnabled = false;
         try {
             chrome.executeCdpCommand("DOM.enable", new HashMap<>());
+            domEnabled = true;
             Map<String, Object> getDocParams = new HashMap<>();
             getDocParams.put("depth", -1);
             getDocParams.put("pierce", true);
@@ -1111,6 +1122,14 @@ public class Percy {
             }
         } catch (Exception ex) {
             log("Could not expose closed shadow roots via CDP: " + ex.getMessage(), "debug");
+        } finally {
+            // Release the DOM domain so subsequent commands don't keep emitting
+            // DOM events for this session. Best-effort — we don't care if this
+            // fails (e.g., session already closed).
+            if (domEnabled) {
+                try { chrome.executeCdpCommand("DOM.disable", new HashMap<>()); }
+                catch (Exception ignore) { /* defensive */ }
+            }
         }
     }
 
