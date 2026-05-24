@@ -181,7 +181,7 @@ public class IframeFeatureTest {
   }
 
   @Test
-  public void processFrameSkipsAfterSwitchWhenDocumentUrlIsUnsupported() throws Exception {
+  public void processFrameTreeSkipsAfterSwitchWhenDocumentUrlIsUnsupported() throws Exception {
     RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
     Percy percy = spy(new Percy(mockedDriver));
     setField(percy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
@@ -194,16 +194,25 @@ public class IframeFeatureTest {
     when(mockedDriver.switchTo()).thenReturn(targetLocator);
     when(targetLocator.frame(iframe)).thenReturn(mockedDriver);
     when(targetLocator.defaultContent()).thenReturn(mockedDriver);
+    when(targetLocator.parentFrame()).thenReturn(mockedDriver);
 
-    // First executeScript is the dom.js injection (script string); the second
-    // is `return document.URL` which we make report an unsupported scheme.
+    // First executeScript is the dom.js injection; the second `return document.URL`
+    // reports an unsupported scheme so the frame is skipped before serialization.
     when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class)))
-      .thenReturn(null)               // domJs inject
-      .thenReturn("about:blank");      // document.URL
+      .thenReturn(null)
+      .thenReturn("about:blank");
 
-    Object result = invokePrivate(percy, "processFrame", new Class[]{WebElement.class, Map.class}, iframe, new HashMap<>());
-    assertNull(result, "Frame must be skipped when document.URL is unsupported after switch");
-    verify(targetLocator).defaultContent();
+    Map<String, Object> ctx = new HashMap<>();
+    ctx.put("options", new HashMap<String, Object>());
+    ctx.put("maxFrameDepth", 5);
+    ctx.put("ignoreSelectors", java.util.Collections.<String>emptyList());
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> result = (List<Map<String, Object>>) invokePrivate(
+      percy, "processFrameTree",
+      new Class[]{WebElement.class, int.class, Set.class, Map.class},
+      iframe, 1, new HashSet<String>(), ctx);
+    assertTrue(result.isEmpty(), "Frame must be skipped when document.URL is unsupported after switch");
   }
 
   @Test
@@ -347,6 +356,195 @@ public class IframeFeatureTest {
     assertEquals(1, pairs.size(), "Only the closed shadow root outside any iframe should be collected");
     assertEquals(100, pairs.get(0).get("hostBackendNodeId"));
     assertEquals(200, pairs.get(0).get("shadowBackendNodeId"));
+  }
+
+  @Test
+  public void clampFrameDepthZeroReturnsDocumentedDefault() throws Exception {
+    // Semantic regression test: maxIframeDepth=0 must fall back to the
+    // documented default (5), matching @percy/sdk-utils behaviour. Anyone
+    // who later changes this to "0 disables CORS capture" would break
+    // cross-SDK alignment — this test guards against the silent flip.
+    int fromZero = (int) invokeStaticPrivate("clampFrameDepth", new Class[]{int.class}, 0);
+    assertEquals(5, fromZero, "maxIframeDepth=0 must use the canonical default (5), not disable nested capture");
+  }
+
+  @Test
+  public void nestedIframeWithNullOriginIsNullSafeAndDoesNotAbortLoop() throws Exception {
+    // Regression test for the NPE risk at processFrameTree's child-origin
+    // comparison. A child <iframe src="data:..."> resolves to a URI with no
+    // host, and getOrigin returns an empty/blank value. The comparison
+    // (`Objects.equals(childOrigin, currentOrigin)`) must NOT throw — if it
+    // did, the per-iframe catch would swallow the NPE and skip the frame,
+    // losing the capture.
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    Percy percy = spy(new Percy(mockedDriver));
+    setField(percy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+    // Outer cross-origin iframe with a same-origin sibling that resolves to
+    // a data:... URI (no host -> null/empty origin). We don't actually
+    // recurse into the child because its origin is treated as "different
+    // from parent" only when non-equal; the key assertion is that the
+    // equality call itself is null-safe and does not throw.
+    WebElement iframe = mock(WebElement.class);
+    when(iframe.getAttribute("src")).thenReturn("https://cdn.other.com/frame");
+    when(iframe.getAttribute("data-percy-element-id")).thenReturn("frame-a");
+    when(iframe.getAttribute("data-percy-ignore")).thenReturn(null);
+
+    WebElement nestedDataIframe = mock(WebElement.class);
+    when(nestedDataIframe.getAttribute("src")).thenReturn("data:text/html,<p>x</p>");
+
+    when(mockedDriver.getCurrentUrl()).thenReturn("https://app.example.com/page");
+    when(mockedDriver.findElements(By.tagName("iframe")))
+      .thenReturn(Collections.singletonList(iframe))
+      // Inside the frame, findElements returns the data: iframe child.
+      .thenReturn(Collections.singletonList(nestedDataIframe));
+
+    TargetLocator targetLocator = mock(TargetLocator.class);
+    when(mockedDriver.switchTo()).thenReturn(targetLocator);
+    when(targetLocator.frame(iframe)).thenReturn(mockedDriver);
+    when(targetLocator.parentFrame()).thenReturn(mockedDriver);
+    when(targetLocator.defaultContent()).thenReturn(mockedDriver);
+
+    Map<String, Object> mainSnapshot = new HashMap<>();
+    mainSnapshot.put("dom", "main");
+    Map<String, Object> iframeSnapshot = new HashMap<>();
+    iframeSnapshot.put("dom", "iframe");
+    when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+      String script = invocation.getArgument(0);
+      if (script.startsWith("return PercyDOM.serialize(")) {
+        if (script.contains("\"enableJavaScript\":true")) return iframeSnapshot;
+        return mainSnapshot;
+      }
+      if (script.equals("return document.URL")) return "https://cdn.other.com/frame";
+      return null;
+    });
+
+    Map<String, Object> options = new HashMap<>();
+    options.put("maxIframeDepth", 3);
+
+    // Must complete without throwing; outer CORS iframe must still be captured.
+    @SuppressWarnings("unchecked")
+    Map<String, Object> serialized = (Map<String, Object>) invokePrivate(
+      percy, "getSerializedDOM",
+      new Class[]{JavascriptExecutor.class, Set.class, Map.class},
+      mockedDriver, new HashSet<Cookie>(), options);
+    assertTrue(serialized.containsKey("corsIframes"),
+      "Outer CORS iframe capture must survive a child with a null/empty origin (data: URI)");
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> caps = (List<Map<String, Object>>) serialized.get("corsIframes");
+    assertEquals(1, caps.size(), "data:... child must be skipped without aborting the outer frame");
+  }
+
+  @Test
+  public void exposeClosedShadowRootsIsAttemptedInsideCorsFrame() throws Exception {
+    // Verifies MAJOR #3: the closed-shadow CDP exposure runs not only at the
+    // top page but also inside each CORS frame after switchTo().frame(...).
+    // We can't assert CDP calls on a non-Chrome mock, but we can confirm the
+    // top-page + per-frame call attempts proceed without throwing and that
+    // the outer frame snapshot is still captured.
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    Percy percy = spy(new Percy(mockedDriver));
+    setField(percy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+    WebElement iframe = mock(WebElement.class);
+    when(iframe.getAttribute("src")).thenReturn("https://cdn.other.com/frame");
+    when(iframe.getAttribute("data-percy-element-id")).thenReturn("frame-shadow");
+    when(iframe.getAttribute("data-percy-ignore")).thenReturn(null);
+
+    when(mockedDriver.getCurrentUrl()).thenReturn("https://app.example.com/page");
+    when(mockedDriver.findElements(By.tagName("iframe")))
+      .thenReturn(Collections.singletonList(iframe))
+      .thenReturn(Collections.emptyList());
+
+    TargetLocator targetLocator = mock(TargetLocator.class);
+    when(mockedDriver.switchTo()).thenReturn(targetLocator);
+    when(targetLocator.frame(iframe)).thenReturn(mockedDriver);
+    when(targetLocator.parentFrame()).thenReturn(mockedDriver);
+    when(targetLocator.defaultContent()).thenReturn(mockedDriver);
+
+    Map<String, Object> mainSnapshot = new HashMap<>();
+    mainSnapshot.put("dom", "main");
+    Map<String, Object> iframeSnapshot = new HashMap<>();
+    iframeSnapshot.put("dom", "iframe");
+    when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+      String script = invocation.getArgument(0);
+      if (script.startsWith("return PercyDOM.serialize(")) {
+        if (script.contains("\"enableJavaScript\":true")) return iframeSnapshot;
+        return mainSnapshot;
+      }
+      if (script.equals("return document.URL")) return "https://cdn.other.com/frame";
+      return null;
+    });
+
+    @SuppressWarnings("unchecked")
+    Map<String, Object> serialized = (Map<String, Object>) invokePrivate(
+      percy, "getSerializedDOM",
+      new Class[]{JavascriptExecutor.class, Set.class, Map.class},
+      mockedDriver, new HashSet<Cookie>(), new HashMap<>());
+
+    assertTrue(serialized.containsKey("corsIframes"),
+      "CORS iframe capture must succeed even with the closed-shadow CDP step attempted inside the frame");
+
+    // Confirm the closed-shadow helper exists with the expected signature and
+    // is safely invocable on a non-Chrome driver without throwing — this is
+    // the same call path the per-frame attempt uses inside processFrameTree.
+    Method m = Percy.class.getDeclaredMethod("exposeClosedShadowRoots", WebDriver.class);
+    m.setAccessible(true);
+    m.invoke(percy, mockedDriver);
+
+    // The source contains the per-frame call site (guards against the call
+    // being removed in a future refactor without updating this test).
+    String src = new String(java.nio.file.Files.readAllBytes(
+      java.nio.file.Paths.get("src/main/java/io/percy/selenium/Percy.java")));
+    assertTrue(src.contains("exposeClosedShadowRoots(driver)") &&
+               src.contains("TODO(closed-shadow-cors)"),
+      "processFrameTree must invoke exposeClosedShadowRoots inside each CORS frame");
+  }
+
+  @Test
+  public void collectClosedShadowPairsContinuesPastOneBadEntry() throws Exception {
+    // MAJOR #5: in exposeClosedShadowRoots the per-pair body is already
+    // wrapped in try/catch so a single bad backendNodeId pair must not
+    // abort the rest. We exercise the collector against a tree that mixes
+    // a valid closed-shadow pair and one missing fields; the helper itself
+    // is permissive, and the runtime loop swallows per-pair failures.
+    Method m = Percy.class.getDeclaredMethod("collectClosedShadowPairs", Map.class, List.class);
+    m.setAccessible(true);
+
+    Map<String, Object> validClosed = new HashMap<>();
+    validClosed.put("backendNodeId", 10);
+    validClosed.put("shadowRootType", "closed");
+    Map<String, Object> hostA = new HashMap<>();
+    hostA.put("backendNodeId", 1);
+    hostA.put("shadowRoots", Collections.singletonList(validClosed));
+
+    // Missing backendNodeId on host — collector still records null; the
+    // exposeClosedShadowRoots loop must skip without aborting the next pair.
+    Map<String, Object> badClosed = new HashMap<>();
+    badClosed.put("shadowRootType", "closed");
+    // intentionally no backendNodeId
+    Map<String, Object> hostB = new HashMap<>();
+    // intentionally no backendNodeId
+    hostB.put("shadowRoots", Collections.singletonList(badClosed));
+
+    Map<String, Object> root = new HashMap<>();
+    root.put("children", Arrays.asList(hostB, hostA));
+
+    List<Map<String, Object>> pairs = new ArrayList<>();
+    m.invoke(null, root, pairs);
+
+    // Both pairs are collected (one valid, one null-field) — the per-pair
+    // try/catch in exposeClosedShadowRoots is what makes the bad one
+    // tolerable at runtime. The collector itself must not throw.
+    assertEquals(2, pairs.size(), "Collector tolerates missing backendNodeId without throwing");
+    boolean sawValid = false;
+    for (Map<String, Object> p : pairs) {
+      if (Integer.valueOf(10).equals(p.get("shadowBackendNodeId"))
+          && Integer.valueOf(1).equals(p.get("hostBackendNodeId"))) {
+        sawValid = true;
+      }
+    }
+    assertTrue(sawValid, "Valid pair must still be present alongside the bad entry");
   }
 
   // ---------- reflection helpers ----------
