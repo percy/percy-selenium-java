@@ -644,8 +644,15 @@ public class Percy {
         }
     }
 
-    // Clamp the configured frame depth to a sane range. Negative or
-    // unreasonably large values fall back to the default.
+    // Clamp the configured frame depth to a sane range.
+    //
+    // Semantic note: a value below MIN_FRAME_DEPTH (1) — including 0 and any
+    // negative number — falls back to DEFAULT_MAX_FRAME_DEPTH. This matches
+    // the @percy/sdk-utils canonical behaviour where `maxIframeDepth=0` is
+    // treated as "unset, use default" rather than "disable nested CORS
+    // capture". To disable CORS iframe traversal, callers should rely on
+    // ignoreIframeSelectors or data-percy-ignore — not depth=0. Keeping this
+    // aligned with sdk-utils avoids a breaking-change divergence across SDKs.
     private static int clampFrameDepth(int depth) {
         if (depth < MIN_FRAME_DEPTH) return DEFAULT_MAX_FRAME_DEPTH;
         if (depth > MAX_FRAME_DEPTH_CAP) return MAX_FRAME_DEPTH_CAP;
@@ -763,63 +770,6 @@ public class Percy {
         return snapshot;
     }
 
-    private Map<String, Object> processFrame(WebElement frameElement, Map<String, Object> options) {
-        // Read attributes while still in parent context — these calls will
-        // fail if made after switchTo().frame().
-        String frameUrl = frameElement.getAttribute("src");
-        if (frameUrl == null) frameUrl = "unknown-src";
-        final String finalFrameUrl = frameUrl;
-        String percyElementId = frameElement.getAttribute("data-percy-element-id");
-        log("processFrame: data-percy-element-id=\"" + percyElementId + "\" for src=\"" + finalFrameUrl + "\"", "debug");
-        if (percyElementId == null || percyElementId.isEmpty()) {
-            log("Skipping frame " + finalFrameUrl + ": no matching percyElementId found", "debug");
-            return null;
-        }
-
-        Map<String, Object> iframeSnapshot = null;
-        try {
-            driver.switchTo().frame(frameElement);
-            JavascriptExecutor jse = (JavascriptExecutor) driver;
-            // Inject Percy DOM into the cross-origin frame context
-            jse.executeScript(domJs);
-            // Post-switch URL re-check: about:blank / data: / javascript: targets
-            // can slip through the parent-side `src` check (e.g. when the iframe
-            // failed to load, or has been navigated by script after attach).
-            String postSwitchUrl = readCurrentFrameUrl();
-            if (postSwitchUrl != null && isUnsupportedIframeSrc(postSwitchUrl)) {
-                log("Skipping iframe after switch: unsupported document.URL \"" + postSwitchUrl + "\"", "debug");
-                return null;
-            }
-            // Serialize inside the frame; enableJavaScript=true is required for CORS iframes
-            Map<String, Object> iframeOptions = new HashMap<>(options);
-            iframeOptions.put("enableJavaScript", true);
-            JSONObject optionsJson = new JSONObject(iframeOptions);
-            iframeSnapshot = (Map<String, Object>) jse.executeScript(
-                "return PercyDOM.serialize(" + optionsJson.toString() + ")"
-            );
-        } catch (Exception e) {
-            log("Failed to process cross-origin frame " + finalFrameUrl + ": " + e.getMessage(), "error");
-            throw new RuntimeException("Failed to process cross-origin frame " + finalFrameUrl, e);
-        } finally {
-            try {
-                driver.switchTo().defaultContent();
-            } catch (Exception err) {
-                throw new FatalIframeException(
-                    "Could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable.", err
-                );
-            }
-        }
-
-        Map<String, Object> iframeData = new HashMap<>();
-        iframeData.put("percyElementId", percyElementId);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("iframeData", iframeData);
-        result.put("iframeSnapshot", iframeSnapshot);
-        result.put("frameUrl", finalFrameUrl);
-        return result;
-    }
-
     // Recursively process a cross-origin iframe tree. From the current driver
     // frame context, switch into `frameElement`, capture its DOM, enumerate
     // further cross-origin iframes nested inside it, and recurse. Steps back
@@ -877,6 +827,19 @@ public class Percy {
                 return collected;
             }
 
+            // Expose closed shadow roots inside this CORS frame's document
+            // before serializing — mirrors the top-page behaviour so closed
+            // shadow DOM inside cross-origin iframes is also captured.
+            // CDP DOM.getDocument is invoked at depth=-1 with pierce=true, and
+            // contentDocument subtrees are skipped during collection so this
+            // remains scoped to the host element-level pairs visible from the
+            // current driver session. Non-fatal — wrapped in try/catch so a
+            // non-Chromium driver or restricted frame falls through silently.
+            // TODO(closed-shadow-cors): drive per-frame CDP via flat sessions
+            // (Target.setAutoAttach / sessionId) for deeper isolation when
+            // Selenium 4 BiDi support stabilises across versions.
+            try { exposeClosedShadowRoots(driver); } catch (Exception ignore) {}
+
             Map<String, Object> iframeSnapshot = serializeCurrentFrame(options);
             String reportedUrl = (postSwitchUrl != null) ? postSwitchUrl : frameSrc;
 
@@ -924,7 +887,11 @@ public class Percy {
                         continue;
                     }
                     // Compare to the IMMEDIATE PARENT origin, not the page origin.
-                    if (childOrigin.equals(currentOrigin)) continue;
+                    // Null-safe: getOrigin currently returns "" on parse failure, but a
+                    // child URI resolving to no host (e.g. data:, mailto:, schemeless)
+                    // could yield null in future refactors. Objects.equals avoids any
+                    // NPE escaping to the per-iframe catch.
+                    if (Objects.equals(childOrigin, currentOrigin)) continue;
 
                     try {
                         List<Map<String, Object>> nested = processFrameTree(child, depth + 1, nextAncestors, ctx);
@@ -1025,7 +992,8 @@ public class Percy {
                         log("Skipping iframe \"" + frameSrc + "\": " + e.getMessage(), "debug");
                         continue;
                     }
-                    if (frameOrigin.equals(pageOrigin)) continue;
+                    // Null-safe equality — see processFrameTree() for rationale.
+                    if (Objects.equals(frameOrigin, pageOrigin)) continue;
 
                     Set<String> ancestors = new HashSet<>();
                     if (pageUrl != null) ancestors.add(pageUrl);
