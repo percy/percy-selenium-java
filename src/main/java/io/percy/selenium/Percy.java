@@ -605,7 +605,7 @@ public class Percy {
     }
 
     /**
-     * Readiness gate (PER-7348): runs PercyDOM.waitForReady BEFORE serialize.
+     * Readiness gate: runs PercyDOM.waitForReady BEFORE serialize.
      *
      * Uses executeAsyncScript with a callback signal. The embedded JS checks
      * typeof PercyDOM.waitForReady === 'function' so older CLI versions that
@@ -766,7 +766,7 @@ public class Percy {
     }
 
     Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
-        // Readiness gate before serialize (PER-7348). Graceful on old CLI.
+        // Readiness gate before serialize. Graceful on old CLI.
         Object readinessDiagnostics = waitForReady(jse, options);
 
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));

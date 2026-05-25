@@ -1109,7 +1109,7 @@ import java.net.URL;
         }
     }
 
-    // --- Readiness gate (PER-7348) -----------------------------------------
+    // --- Readiness gate -----------------------------------------
 
     @Test
     public void readinessRunsBeforeSerializeAndAttachesDiagnostics() throws Exception {
