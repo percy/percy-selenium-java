@@ -87,6 +87,27 @@ public class Percy {
     }
 
     /**
+     * Override the client info reported to Percy.
+     * Used by framework wrappers (e.g., Cucumber) to identify themselves.
+     *
+     * @param clientInfo      Client identifier (e.g., "percy-cucumber-java-selenium/2.1.2")
+     * @param environmentInfo Environment details (e.g., "cucumber-java/7.15.0; selenium-java; ChromeDriver")
+     */
+    public void setClientInfo(String clientInfo, String environmentInfo) {
+        this.env.setClientInfo(clientInfo);
+        this.env.setEnvironmentInfo(environmentInfo);
+    }
+
+    /**
+     * Get the SDK version string.
+     *
+     * @return SDK version (e.g., "2.1.2")
+     */
+    public static String getSdkVersion() {
+        return Environment.getSdkVersion();
+    }
+
+    /**
      * Creates a region configuration based on the provided parameters.
      *
      * @param params A map containing the region configuration options. Expected keys:
