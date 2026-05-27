@@ -567,6 +567,10 @@ public class Percy {
 
         // Build a JSON object to POST back to the agent node process
         JSONObject json = new JSONObject(options);
+        // `readiness` is SDK-local — the CLI already has it via healthcheck.
+        // Strip before posting to avoid round-tripping and to stay forward-
+        // compatible with future CLI-side validators rejecting unknown fields.
+        json.remove("readiness");
         json.put("url", url);
         json.put("name", name);
         json.put("domSnapshot", domSnapshot);
@@ -617,9 +621,97 @@ public class Percy {
     private String buildSnapshotJS(Map<String, Object> options) {
         StringBuilder jsBuilder = new StringBuilder();
         JSONObject json = new JSONObject(options);
+        // `readiness` is consumed by waitForReady upstream — not a serialize arg.
+        json.remove("readiness");
         jsBuilder.append(String.format("return PercyDOM.serialize(%s)\n", json.toString()));
 
         return jsBuilder.toString();
+    }
+
+    /**
+     * Readiness gate: runs PercyDOM.waitForReady BEFORE serialize.
+     *
+     * Uses executeAsyncScript with a callback signal. The embedded JS checks
+     * typeof PercyDOM.waitForReady === 'function' so older CLI versions that
+     * lack the method are a graceful no-op.
+     *
+     * Config precedence: per-snapshot options["readiness"] is shallow-merged
+     * over cliConfig.snapshot.readiness so a partial per-snapshot override
+     * inherits global keys (notably preset: disabled) instead of dropping
+     * them. The merged "disabled" preset skips the executeAsyncScript entirely.
+     *
+     * @return Readiness diagnostics to attach to the domSnapshot, or null.
+     */
+    protected Object waitForReady(JavascriptExecutor jse, Map<String, Object> options) {
+        JSONObject readinessConfig = resolveReadinessConfig(options);
+        if ("disabled".equals(readinessConfig.optString("preset", null))) {
+            return null;
+        }
+        // Match the driver's async-script timeout to readiness.timeoutMs so
+        // a higher user-configured timeout isn't silently capped by WebDriver
+        // firing ScriptTimeoutException before the in-page Promise resolves.
+        long timeoutMs = readinessConfig.optLong("timeoutMs", 0L);
+        Duration previousTimeout = null;
+        if (timeoutMs > 0) {
+            try {
+                previousTimeout = jse instanceof org.openqa.selenium.WebDriver
+                        ? ((org.openqa.selenium.WebDriver) jse).manage().timeouts().getScriptTimeout()
+                        : null;
+                if (jse instanceof org.openqa.selenium.WebDriver) {
+                    ((org.openqa.selenium.WebDriver) jse).manage().timeouts()
+                            .scriptTimeout(Duration.ofMillis(timeoutMs + 2000L));
+                }
+            } catch (Exception e) {
+                previousTimeout = null; // best-effort; older Selenium / unsupported
+            }
+        }
+        try {
+            String script =
+                "var cfg = " + readinessConfig.toString() + ";"
+                + "var done = arguments[arguments.length - 1];"
+                + "try {"
+                + "  if (typeof PercyDOM !== 'undefined' && typeof PercyDOM.waitForReady === 'function') {"
+                + "    PercyDOM.waitForReady(cfg).then(function(r){ done(r); }).catch(function(){ done(); });"
+                + "  } else { done(); }"
+                + "} catch (e) { done(); }";
+            return jse.executeAsyncScript(script);
+        } catch (Exception e) {
+            log("waitForReady failed, proceeding to serialize: " + e.getMessage(), "debug");
+            return null;
+        } finally {
+            if (previousTimeout != null && jse instanceof org.openqa.selenium.WebDriver) {
+                try {
+                    ((org.openqa.selenium.WebDriver) jse).manage().timeouts()
+                            .scriptTimeout(previousTimeout);
+                } catch (Exception ignored) { /* best effort */ }
+            }
+        }
+    }
+
+    /**
+     * Shallow-merge of global (cliConfig.snapshot.readiness) and per-snapshot
+     * (options["readiness"]) readiness config. Per-snapshot keys win, global
+     * keys are inherited. Defensive against null / wrong-type values.
+     */
+    @SuppressWarnings("unchecked")
+    private JSONObject resolveReadinessConfig(Map<String, Object> options) {
+        JSONObject merged = new JSONObject();
+        if (cliConfig != null) {
+            JSONObject snapshotConfig = cliConfig.optJSONObject("snapshot");
+            JSONObject global = snapshotConfig == null ? null : snapshotConfig.optJSONObject("readiness");
+            if (global != null) {
+                for (String key : global.keySet()) merged.put(key, global.get(key));
+            }
+        }
+        Object perSnapshot = options != null ? options.get("readiness") : null;
+        if (perSnapshot instanceof Map) {
+            JSONObject perJson = new JSONObject((Map<String, Object>) perSnapshot);
+            for (String key : perJson.keySet()) merged.put(key, perJson.get(key));
+        } else if (perSnapshot instanceof JSONObject) {
+            JSONObject perJson = (JSONObject) perSnapshot;
+            for (String key : perJson.keySet()) merged.put(key, perJson.get(key));
+        }
+        return merged;
     }
 
     static class FatalIframeException extends RuntimeException {
@@ -963,7 +1055,10 @@ public class Percy {
         }
     }
 
-    private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+    Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+        // Readiness gate before serialize. Graceful on old CLI.
+        Object readinessDiagnostics = waitForReady(jse, options);
+
         Object raw = jse.executeScript(buildSnapshotJS(options));
         if (!(raw instanceof Map)) {
             throw new RuntimeException("PercyDOM.serialize returned null or non-object; "
@@ -973,6 +1068,11 @@ public class Percy {
         Map<String, Object> domSnapshot = (Map<String, Object>) raw;
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
+
+        // Attach readiness diagnostics so the CLI can log timing and pass/fail
+        if (readinessDiagnostics != null) {
+            mutableSnapshot.put("readiness_diagnostics", readinessDiagnostics);
+        }
 
         // Expose closed shadow roots via CDP (Chromium only) so PercyDOM.serialize
         // can pierce them through the WeakMap it reads. Non-fatal — skip on errors.
