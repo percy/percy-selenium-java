@@ -1109,6 +1109,82 @@ import java.net.URL;
         }
     }
 
+    // --- Readiness gate -----------------------------------------
+
+    @Test
+    public void readinessRunsBeforeSerializeAndAttachesDiagnostics() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = new Percy(mockedDriver);
+      setField(mockedPercy, "isPercyEnabled", true);
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+
+      Map<String, Object> diagnostics = new HashMap<>();
+      diagnostics.put("ok", true);
+      diagnostics.put("timed_out", false);
+      // executeAsyncScript (readiness)
+      when(((JavascriptExecutor) mockedDriver).executeAsyncScript(any(String.class))).thenReturn(diagnostics);
+      // executeScript (serialize + any other sync scripts)
+      Map<String, Object> domSnap = new HashMap<>();
+      domSnap.put("html", "<html></html>");
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenReturn(domSnap);
+
+      Map<String, Object> result = mockedPercy.getSerializedDOM(
+          (JavascriptExecutor) mockedDriver, new HashSet<>(), new HashMap<>());
+
+      // Readiness script was sent via executeAsyncScript
+      ArgumentCaptor<String> scriptCap = ArgumentCaptor.forClass(String.class);
+      verify((JavascriptExecutor) mockedDriver, atLeastOnce()).executeAsyncScript(scriptCap.capture());
+      assertTrue(scriptCap.getValue().contains("waitForReady"),
+          "readiness script should mention waitForReady");
+      // Diagnostics propagated to the snapshot
+      assertEquals(diagnostics, result.get("readiness_diagnostics"));
+    }
+
+    @Test
+    public void readinessSkippedWhenPresetDisabled() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = new Percy(mockedDriver);
+      setField(mockedPercy, "isPercyEnabled", true);
+
+      Map<String, Object> domSnap = new HashMap<>();
+      domSnap.put("html", "<html></html>");
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenReturn(domSnap);
+
+      Map<String, Object> disabled = new HashMap<>();
+      disabled.put("preset", "disabled");
+      Map<String, Object> options = new HashMap<>();
+      options.put("readiness", disabled);
+
+      Map<String, Object> result = mockedPercy.getSerializedDOM(
+          (JavascriptExecutor) mockedDriver, new HashSet<>(), options);
+
+      // executeAsyncScript must NOT have been called
+      verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(any(String.class));
+      // serialize still ran; no diagnostics attached
+      assertNull(result.get("readiness_diagnostics"));
+    }
+
+    @Test
+    public void snapshotSurvivesReadinessThrow() throws Exception {
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = new Percy(mockedDriver);
+      setField(mockedPercy, "isPercyEnabled", true);
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+
+      when(((JavascriptExecutor) mockedDriver).executeAsyncScript(any(String.class)))
+          .thenThrow(new RuntimeException("readiness boom"));
+      Map<String, Object> domSnap = new HashMap<>();
+      domSnap.put("html", "<html></html>");
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenReturn(domSnap);
+
+      Map<String, Object> result = mockedPercy.getSerializedDOM(
+          (JavascriptExecutor) mockedDriver, new HashSet<>(), new HashMap<>());
+
+      // Serialize still ran; no diagnostics attached
+      assertNull(result.get("readiness_diagnostics"));
+      assertEquals("<html></html>", result.get("html"));
+    }
+
     private static Object invokePrivate(Object target, String methodName, Class<?>[] paramTypes, Object... args)
         throws Exception {
       Method method = Percy.class.getDeclaredMethod(methodName, paramTypes);
