@@ -125,9 +125,11 @@ public class PercyLogicTest {
     // ------------------------------------------------------------------
 
     @Test
-    public void snapshotReturnsNullWhenPercyDisabled() {
+    public void snapshotReturnsNullWhenPercyDisabled() throws Exception {
         Percy percy = spy(new Percy(mock(RemoteWebDriver.class)));
-        // isPercyEnabled defaults to false because no CLI is running locally.
+        // Force the disabled state so the assertion holds regardless of whether a
+        // live Percy CLI is running (e.g. under `percy exec` on CI).
+        setField(percy, "isPercyEnabled", false);
         assertNull(percy.snapshot("disabled"));
         assertNull(percy.snapshot("disabled", Arrays.asList(800)));
         assertNull(percy.snapshot("disabled", Arrays.asList(800), 600));
@@ -135,8 +137,11 @@ public class PercyLogicTest {
     }
 
     @Test
-    public void screenshotReturnsNullWhenPercyDisabled() {
+    public void screenshotReturnsNullWhenPercyDisabled() throws Exception {
         Percy percy = spy(new Percy(mock(RemoteWebDriver.class)));
+        // Force the disabled state so the assertion holds regardless of whether a
+        // live Percy CLI is running (e.g. under `percy exec` on CI).
+        setField(percy, "isPercyEnabled", false);
         assertNull(percy.screenshot("disabled"));
     }
 
@@ -369,6 +374,10 @@ public class PercyLogicTest {
     @Test
     public void resolveResponsiveTargetHeightHonoursFeatureFlag() throws Exception {
         Percy mockedPercy = spy(new Percy(mock(RemoteWebDriver.class)));
+        // Clear any cliConfig that a live Percy CLI (e.g. `percy exec` on CI) may
+        // have populated, so the "no minHeight anywhere" branch deterministically
+        // falls back to currentHeight instead of reading cliConfig.snapshot.minHeight.
+        setField(mockedPercy, "cliConfig", null);
         boolean originalFlag = getStaticBooleanField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT");
         try {
             setStaticField(Percy.class, "PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", false);
