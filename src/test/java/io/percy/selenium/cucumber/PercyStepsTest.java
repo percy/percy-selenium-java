@@ -462,4 +462,115 @@ class PercyStepsTest {
         PercySteps.setDriver(mockDriver);
         assertDoesNotThrow(steps::percyShouldBeEnabled);
     }
+
+    // ------------------------------------------------------------------
+    // Additional coverage: lazy Percy creation, options-table regions,
+    // scopeOptions parsing, and getCucumberVersion fallback paths.
+    // ------------------------------------------------------------------
+
+    @Test
+    void testIHaveAPercyInstanceCreatesPercyWhenDriverSetButPercyNull() throws Exception {
+        // driver set, percy field forced to null -> the `percy == null` branch
+        // inside iHaveAPercyInstance() constructs a fresh Percy instance.
+        PercySteps.setDriver(mockDriver);
+        setPercyField(null);
+        assertNull(PercySteps.getPercy());
+
+        steps.iHaveAPercyInstance();
+        assertNotNull(PercySteps.getPercy());
+    }
+
+    @Test
+    void testTakeSnapshotWithOptionsTableIncludesRegions() {
+        initWithMockPercy();
+        Map<String, Object> fakeRegion = new HashMap<>();
+        fakeRegion.put("algorithm", "ignore");
+        when(mockPercy.createRegion(anyMap())).thenReturn(fakeRegion);
+
+        steps.iHaveAPercyInstance();
+        steps.iCreateIgnoreRegionCSS(".ad-banner");
+
+        Map<String, String> optionsTable = new LinkedHashMap<>();
+        optionsTable.put("percyCSS", "body { color: green; }");
+        steps.iTakeSnapshotWithOptions("Options+Regions", optionsTable);
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(mockPercy).snapshot(eq("Options+Regions"), captor.capture());
+        List<Map<String, Object>> regions = (List<Map<String, Object>>) captor.getValue().get("regions");
+        assertNotNull(regions);
+        assertEquals(1, regions.size());
+        assertEquals("body { color: green; }", captor.getValue().get("percyCSS"));
+    }
+
+    @Test
+    void testTakeScreenshotWithOptionsTableIncludesRegions() {
+        initWithMockPercy();
+        Map<String, Object> fakeRegion = new HashMap<>();
+        fakeRegion.put("algorithm", "ignore");
+        when(mockPercy.createRegion(anyMap())).thenReturn(fakeRegion);
+
+        steps.iHaveAPercyInstance();
+        steps.iCreateIgnoreRegionCSS(".banner");
+
+        Map<String, String> optionsTable = new LinkedHashMap<>();
+        optionsTable.put("percyCSS", "body { color: red; }");
+        steps.iTakeScreenshotWithOptions("Shot+Regions", optionsTable);
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(mockPercy).screenshot(eq("Shot+Regions"), captor.capture());
+        List<Map<String, Object>> regions = (List<Map<String, Object>>) captor.getValue().get("regions");
+        assertNotNull(regions);
+        assertEquals(1, regions.size());
+    }
+
+    @Test
+    void testBuildOptionsParsesScopeOptions() {
+        initWithMockPercy();
+        Map<String, String> optionsTable = new LinkedHashMap<>();
+        optionsTable.put("scopeOptions", "{\"scroll\":true}");
+
+        steps.iTakeSnapshotWithOptions("Scoped", optionsTable);
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(mockPercy).snapshot(eq("Scoped"), captor.capture());
+        Map<String, Object> scopeOptions = (Map<String, Object>) captor.getValue().get("scopeOptions");
+        assertNotNull(scopeOptions);
+        assertEquals(true, scopeOptions.get("scroll"));
+    }
+
+    @Test
+    void testGetCucumberVersionReturnsValueWhenManifestPresent() throws Exception {
+        // Drives the happy path of the version-resolution seam: a non-null
+        // implementation version is returned verbatim.
+        String version = invokeGetCucumberVersionWithResolver(() -> "9.9.9");
+        assertEquals("9.9.9", version);
+    }
+
+    @Test
+    void testGetCucumberVersionFallsBackToUnknownWhenManifestMissing() throws Exception {
+        // resolver returns null (no manifest) -> "unknown".
+        String version = invokeGetCucumberVersionWithResolver(() -> null);
+        assertEquals("unknown", version);
+    }
+
+    @Test
+    void testGetCucumberVersionFallsBackToUnknownWhenResolverThrows() throws Exception {
+        // resolver throws -> the catch block returns "unknown".
+        String version = invokeGetCucumberVersionWithResolver(() -> { throw new RuntimeException("boom"); });
+        assertEquals("unknown", version);
+    }
+
+    /**
+     * Invokes the package-private {@code resolveCucumberVersion} seam so the
+     * happy/null/throwing branches of {@link PercySteps#getCucumberVersion()}
+     * can be exercised deterministically without depending on the cucumber jar
+     * manifest (which is absent under test).
+     */
+    private static String invokeGetCucumberVersionWithResolver(
+            java.util.concurrent.Callable<String> resolver) throws Exception {
+        java.lang.reflect.Method m = PercySteps.class.getDeclaredMethod(
+            "resolveCucumberVersion", java.util.concurrent.Callable.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, resolver);
+    }
 }
