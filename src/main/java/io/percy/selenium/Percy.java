@@ -383,7 +383,14 @@ public class Percy {
             }
         }
         if (options != null) {
-            mergedOptions.putAll(options);
+            // Only overlay non-null per-call options so a null value (set by the
+            // positional snapshot() overloads for unset params) does not clobber a
+            // real value coming from .percy.yml config.
+            for (Map.Entry<String, Object> entry : options.entrySet()) {
+                if (entry.getValue() != null) {
+                    mergedOptions.put(entry.getKey(), entry.getValue());
+                }
+            }
         }
 
         try {
