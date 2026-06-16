@@ -87,6 +87,27 @@ public class Percy {
     }
 
     /**
+     * Override the client info reported to Percy.
+     * Used by framework wrappers (e.g., Cucumber) to identify themselves.
+     *
+     * @param clientInfo      Client identifier (e.g., "percy-cucumber-java-selenium/2.1.2")
+     * @param environmentInfo Environment details (e.g., "cucumber-java/7.15.0; selenium-java; ChromeDriver")
+     */
+    public void setClientInfo(String clientInfo, String environmentInfo) {
+        this.env.setClientInfo(clientInfo);
+        this.env.setEnvironmentInfo(environmentInfo);
+    }
+
+    /**
+     * Get the SDK version string.
+     *
+     * @return SDK version (e.g., "2.1.2")
+     */
+    public static String getSdkVersion() {
+        return Environment.getSdkVersion();
+    }
+
+    /**
      * Creates a region configuration based on the provided parameters.
      *
      * @param params A map containing the region configuration options. Expected keys:
@@ -555,6 +576,10 @@ public class Percy {
 
         // Build a JSON object to POST back to the agent node process
         JSONObject json = new JSONObject(options);
+        // `readiness` is SDK-local — the CLI already has it via healthcheck.
+        // Strip before posting to avoid round-tripping and to stay forward-
+        // compatible with future CLI-side validators rejecting unknown fields.
+        json.remove("readiness");
         json.put("url", url);
         json.put("name", name);
         json.put("domSnapshot", domSnapshot);
@@ -605,9 +630,97 @@ public class Percy {
     private String buildSnapshotJS(Map<String, Object> options) {
         StringBuilder jsBuilder = new StringBuilder();
         JSONObject json = new JSONObject(options);
+        // `readiness` is consumed by waitForReady upstream — not a serialize arg.
+        json.remove("readiness");
         jsBuilder.append(String.format("return PercyDOM.serialize(%s)\n", json.toString()));
 
         return jsBuilder.toString();
+    }
+
+    /**
+     * Readiness gate: runs PercyDOM.waitForReady BEFORE serialize.
+     *
+     * Uses executeAsyncScript with a callback signal. The embedded JS checks
+     * typeof PercyDOM.waitForReady === 'function' so older CLI versions that
+     * lack the method are a graceful no-op.
+     *
+     * Config precedence: per-snapshot options["readiness"] is shallow-merged
+     * over cliConfig.snapshot.readiness so a partial per-snapshot override
+     * inherits global keys (notably preset: disabled) instead of dropping
+     * them. The merged "disabled" preset skips the executeAsyncScript entirely.
+     *
+     * @return Readiness diagnostics to attach to the domSnapshot, or null.
+     */
+    protected Object waitForReady(JavascriptExecutor jse, Map<String, Object> options) {
+        JSONObject readinessConfig = resolveReadinessConfig(options);
+        if ("disabled".equals(readinessConfig.optString("preset", null))) {
+            return null;
+        }
+        // Match the driver's async-script timeout to readiness.timeoutMs so
+        // a higher user-configured timeout isn't silently capped by WebDriver
+        // firing ScriptTimeoutException before the in-page Promise resolves.
+        long timeoutMs = readinessConfig.optLong("timeoutMs", 0L);
+        Duration previousTimeout = null;
+        if (timeoutMs > 0) {
+            try {
+                previousTimeout = jse instanceof org.openqa.selenium.WebDriver
+                        ? ((org.openqa.selenium.WebDriver) jse).manage().timeouts().getScriptTimeout()
+                        : null;
+                if (jse instanceof org.openqa.selenium.WebDriver) {
+                    ((org.openqa.selenium.WebDriver) jse).manage().timeouts()
+                            .scriptTimeout(Duration.ofMillis(timeoutMs + 2000L));
+                }
+            } catch (Exception e) {
+                previousTimeout = null; // best-effort; older Selenium / unsupported
+            }
+        }
+        try {
+            String script =
+                "var cfg = " + readinessConfig.toString() + ";"
+                + "var done = arguments[arguments.length - 1];"
+                + "try {"
+                + "  if (typeof PercyDOM !== 'undefined' && typeof PercyDOM.waitForReady === 'function') {"
+                + "    PercyDOM.waitForReady(cfg).then(function(r){ done(r); }).catch(function(){ done(); });"
+                + "  } else { done(); }"
+                + "} catch (e) { done(); }";
+            return jse.executeAsyncScript(script);
+        } catch (Exception e) {
+            log("waitForReady failed, proceeding to serialize: " + e.getMessage(), "debug");
+            return null;
+        } finally {
+            if (previousTimeout != null && jse instanceof org.openqa.selenium.WebDriver) {
+                try {
+                    ((org.openqa.selenium.WebDriver) jse).manage().timeouts()
+                            .scriptTimeout(previousTimeout);
+                } catch (Exception ignored) { /* best effort */ }
+            }
+        }
+    }
+
+    /**
+     * Shallow-merge of global (cliConfig.snapshot.readiness) and per-snapshot
+     * (options["readiness"]) readiness config. Per-snapshot keys win, global
+     * keys are inherited. Defensive against null / wrong-type values.
+     */
+    @SuppressWarnings("unchecked")
+    private JSONObject resolveReadinessConfig(Map<String, Object> options) {
+        JSONObject merged = new JSONObject();
+        if (cliConfig != null) {
+            JSONObject snapshotConfig = cliConfig.optJSONObject("snapshot");
+            JSONObject global = snapshotConfig == null ? null : snapshotConfig.optJSONObject("readiness");
+            if (global != null) {
+                for (String key : global.keySet()) merged.put(key, global.get(key));
+            }
+        }
+        Object perSnapshot = options != null ? options.get("readiness") : null;
+        if (perSnapshot instanceof Map) {
+            JSONObject perJson = new JSONObject((Map<String, Object>) perSnapshot);
+            for (String key : perJson.keySet()) merged.put(key, perJson.get(key));
+        } else if (perSnapshot instanceof JSONObject) {
+            JSONObject perJson = (JSONObject) perSnapshot;
+            for (String key : perJson.keySet()) merged.put(key, perJson.get(key));
+        }
+        return merged;
     }
 
     static class FatalIframeException extends RuntimeException {
@@ -685,10 +798,18 @@ public class Percy {
         return result;
     }
 
-    private Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+    Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
+        // Readiness gate before serialize. Graceful on old CLI.
+        Object readinessDiagnostics = waitForReady(jse, options);
+
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
+
+        // Attach readiness diagnostics so the CLI can log timing and pass/fail
+        if (readinessDiagnostics != null) {
+            mutableSnapshot.put("readiness_diagnostics", readinessDiagnostics);
+        }
         try {
             String pageOrigin = getOrigin(driver.getCurrentUrl());
             List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
