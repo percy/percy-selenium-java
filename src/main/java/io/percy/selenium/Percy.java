@@ -29,9 +29,6 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.util.stream.Collectors;
 
-import javax.swing.text.html.CSS;
-import javax.xml.xpath.XPath;
-
 /**
  * Percy client for visual testing.
  */
@@ -803,6 +800,10 @@ public class Percy {
                     for (int i = 0; i < arr.length(); i++) out.add(arr.opt(i));
                     return normalizeIgnoreSelectors(out);
                 }
+                // A single string value (e.g. "ignoreIframeSelectors": "iframe.ads")
+                // isn't a JSONArray; normalize it the same way the options-map path does.
+                String single = snap.optString("ignoreIframeSelectors", null);
+                if (single != null) return normalizeIgnoreSelectors(single);
             }
         }
         return Collections.emptyList();
@@ -815,12 +816,14 @@ public class Percy {
         if (selectors == null || selectors.isEmpty()) return false;
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
-            JSONArray sel = new JSONArray(selectors);
-            String script = "var el = arguments[0]; var selectors = " + sel.toString() + ";"
+            // Pass the selector list as a script argument rather than interpolating
+            // it into the source — a selector containing a quote or control char
+            // would otherwise break the script literal and throw.
+            String script = "var el = arguments[0]; var selectors = arguments[1];"
                 + "for (var i = 0; i < selectors.length; i++) {"
                 + "  try { if (el.matches(selectors[i])) return true; } catch (e) {}"
                 + "} return false;";
-            Object res = jse.executeScript(script, iframe);
+            Object res = jse.executeScript(script, iframe, selectors);
             return res instanceof Boolean && (Boolean) res;
         } catch (Exception e) {
             return false;
@@ -876,10 +879,16 @@ public class Percy {
         Map<String, Object> iframeOptions = new HashMap<>(options == null ? Collections.emptyMap() : options);
         iframeOptions.put("enableJavaScript", true);
         JSONObject optionsJson = new JSONObject(iframeOptions);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> snapshot = (Map<String, Object>) jse.executeScript(
+        Object raw = jse.executeScript(
             "return PercyDOM.serialize(" + optionsJson.toString() + ")"
         );
+        // PercyDOM.serialize yields null (or a non-object) when @percy/dom failed
+        // to load inside this frame — e.g. a sandboxed CORS document. Return null
+        // so the caller can skip the frame instead of letting a poisoned snapshot
+        // through, mirroring the main-page guard in getSerializedDOM.
+        if (!(raw instanceof Map)) return null;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> snapshot = (Map<String, Object>) raw;
         return snapshot;
     }
 
@@ -940,6 +949,17 @@ public class Percy {
                 return collected;
             }
 
+            // Absolute-URL cycle re-check. The pre-switch guard above compares the
+            // raw `src` attribute, which can be relative; a cycle expressed as a
+            // relative src at one level and an absolute URL at another would slip
+            // past it. document.URL here is the resolved absolute URL, and the
+            // ancestor set is seeded with each level's absolute reportedUrl, so
+            // this catches the cycle reliably regardless of how src was written.
+            if (ancestorUrls != null && postSwitchUrl != null && ancestorUrls.contains(postSwitchUrl)) {
+                log("Skipping cyclic iframe (resolved URL " + postSwitchUrl + " appears in ancestor chain)", "debug");
+                return collected;
+            }
+
             // Expose closed shadow roots inside this CORS frame's document
             // before serializing — mirrors the top-page behaviour so closed
             // shadow DOM inside cross-origin iframes is also captured.
@@ -955,6 +975,15 @@ public class Percy {
 
             Map<String, Object> iframeSnapshot = serializeCurrentFrame(options);
             String reportedUrl = (postSwitchUrl != null) ? postSwitchUrl : frameSrc;
+
+            // serializeCurrentFrame returns null when PercyDOM.serialize did not
+            // produce a DOM object (script failed to load in this frame). Skip the
+            // frame rather than emitting an entry with a null snapshot, which the
+            // CLI would otherwise have to defend against.
+            if (iframeSnapshot == null) {
+                log("PercyDOM.serialize returned null inside CORS iframe " + reportedUrl + "; skipping", "warn");
+                return collected;
+            }
 
             Map<String, Object> iframeData = new HashMap<>();
             iframeData.put("percyElementId", percyElementId);
@@ -1159,6 +1188,10 @@ public class Percy {
         if (!(driver instanceof ChromeDriver)) return;
         ChromeDriver chrome;
         try { chrome = (ChromeDriver) driver; } catch (ClassCastException e) { return; }
+        // Reuse the same CDP availability guard as changeWindowDimensionAndWait so
+        // ChromeDriver builds/subclasses without executeCdpCommand bail cleanly
+        // rather than relying on the catch below to absorb a NoSuchMethodError.
+        if (!isCdpSupported(chrome)) return;
         boolean domEnabled = false;
         try {
             chrome.executeCdpCommand("DOM.enable", new HashMap<>());

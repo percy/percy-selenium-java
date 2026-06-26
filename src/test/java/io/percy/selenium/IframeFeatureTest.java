@@ -109,6 +109,21 @@ public class IframeFeatureTest {
   }
 
   @Test
+  public void resolveIgnoreSelectorsAcceptsSingleStringCliConfig() throws Exception {
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    Percy percy = new Percy(mockedDriver);
+    // A scalar string (not an array) in CLI config must still be honoured.
+    setField(percy, "cliConfig",
+      new JSONObject().put("snapshot",
+        new JSONObject().put("ignoreIframeSelectors", "iframe.ads")));
+
+    @SuppressWarnings("unchecked")
+    List<String> fromCli = (List<String>) invokePrivate(percy, "resolveIgnoreSelectors", new Class[]{Map.class}, new HashMap<>());
+    assertEquals(Arrays.asList("iframe.ads"), fromCli,
+      "A single-string ignoreIframeSelectors CLI config must not be dropped");
+  }
+
+  @Test
   public void skipsIframeMarkedWithDataPercyIgnore() throws Exception {
     RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
     Percy percy = spy(new Percy(mockedDriver));
@@ -213,6 +228,83 @@ public class IframeFeatureTest {
       new Class[]{WebElement.class, int.class, Set.class, Map.class},
       iframe, 1, new HashSet<String>(), ctx);
     assertTrue(result.isEmpty(), "Frame must be skipped when document.URL is unsupported after switch");
+  }
+
+  @Test
+  public void processFrameTreeSkipsWhenSerializeReturnsNull() throws Exception {
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    Percy percy = spy(new Percy(mockedDriver));
+    setField(percy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+    WebElement iframe = mock(WebElement.class);
+    when(iframe.getAttribute("src")).thenReturn("https://cdn.other.com/frame");
+    when(iframe.getAttribute("data-percy-element-id")).thenReturn("frame-null");
+
+    TargetLocator targetLocator = mock(TargetLocator.class);
+    when(mockedDriver.switchTo()).thenReturn(targetLocator);
+    when(targetLocator.frame(iframe)).thenReturn(mockedDriver);
+    when(targetLocator.defaultContent()).thenReturn(mockedDriver);
+    when(targetLocator.parentFrame()).thenReturn(mockedDriver);
+
+    // dom.js inject -> null; document.URL -> supported; PercyDOM.serialize -> null
+    // (e.g. @percy/dom failed to load in the frame). The frame must be skipped, not
+    // emitted with a null snapshot.
+    when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
+      String script = invocation.getArgument(0);
+      if (script.startsWith("return PercyDOM.serialize(")) return null;
+      if (script.equals("return document.URL")) return "https://cdn.other.com/frame";
+      return null;
+    });
+
+    Map<String, Object> ctx = new HashMap<>();
+    ctx.put("options", new HashMap<String, Object>());
+    ctx.put("maxFrameDepth", 5);
+    ctx.put("ignoreSelectors", java.util.Collections.<String>emptyList());
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> result = (List<Map<String, Object>>) invokePrivate(
+      percy, "processFrameTree",
+      new Class[]{WebElement.class, int.class, Set.class, Map.class},
+      iframe, 1, new HashSet<String>(), ctx);
+    assertTrue(result.isEmpty(), "Frame must be skipped when PercyDOM.serialize returns null");
+  }
+
+  @Test
+  public void processFrameTreeSkipsCyclicFrameByResolvedUrl() throws Exception {
+    RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+    Percy percy = spy(new Percy(mockedDriver));
+    setField(percy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+
+    // Relative src slips past the pre-switch raw-src cycle guard; the post-switch
+    // absolute document.URL matches an ancestor, so the cycle must still be caught.
+    WebElement iframe = mock(WebElement.class);
+    when(iframe.getAttribute("src")).thenReturn("/frame");
+    when(iframe.getAttribute("data-percy-element-id")).thenReturn("frame-cyc");
+
+    TargetLocator targetLocator = mock(TargetLocator.class);
+    when(mockedDriver.switchTo()).thenReturn(targetLocator);
+    when(targetLocator.frame(iframe)).thenReturn(mockedDriver);
+    when(targetLocator.defaultContent()).thenReturn(mockedDriver);
+    when(targetLocator.parentFrame()).thenReturn(mockedDriver);
+
+    when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class)))
+      .thenReturn(null)
+      .thenReturn("https://cdn.other.com/frame");
+
+    Map<String, Object> ctx = new HashMap<>();
+    ctx.put("options", new HashMap<String, Object>());
+    ctx.put("maxFrameDepth", 5);
+    ctx.put("ignoreSelectors", java.util.Collections.<String>emptyList());
+
+    Set<String> ancestors = new HashSet<>();
+    ancestors.add("https://cdn.other.com/frame");
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> result = (List<Map<String, Object>>) invokePrivate(
+      percy, "processFrameTree",
+      new Class[]{WebElement.class, int.class, Set.class, Map.class},
+      iframe, 1, ancestors, ctx);
+    assertTrue(result.isEmpty(), "Cyclic frame must be skipped when its resolved URL is already an ancestor");
   }
 
   @Test
