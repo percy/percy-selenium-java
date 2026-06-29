@@ -730,16 +730,23 @@ public class Percy {
 
     // Default maximum nesting depth for cross-origin iframe capture. Mirrors the
     // canonical Percy SDK behaviour — depth 1 is a top-level iframe.
-    private static final int DEFAULT_MAX_FRAME_DEPTH = 5;
+    private static final int DEFAULT_MAX_FRAME_DEPTH = 3;
     private static final int MIN_FRAME_DEPTH = 1;
     private static final int MAX_FRAME_DEPTH_CAP = 10;
 
+    // Mirrors the canonical @percy/sdk-utils UNSUPPORTED_IFRAME_SRCS list
+    // (percy/cli #2319): a null/empty src is unsupported, and the check is a
+    // case-insensitive startsWith over the 15 canonical scheme prefixes.
     private boolean isUnsupportedIframeSrc(String src) {
-        return src == null || src.isEmpty() ||
-               src.equals("about:blank") ||
-               src.startsWith("javascript:") ||
-               src.startsWith("data:") ||
-               src.startsWith("vbscript:");
+        if (src == null || src.isEmpty()) return true;
+        String s = src.toLowerCase();
+        return s.startsWith("about:") || s.startsWith("chrome:") ||
+               s.startsWith("chrome-extension:") || s.startsWith("devtools:") ||
+               s.startsWith("edge:") || s.startsWith("opera:") ||
+               s.startsWith("view-source:") || s.startsWith("data:") ||
+               s.startsWith("javascript:") || s.startsWith("blob:") ||
+               s.startsWith("vbscript:") || s.startsWith("file:") ||
+               s.startsWith("ws:") || s.startsWith("wss:") || s.startsWith("ftp:");
     }
 
     private static String getOrigin(String url) {

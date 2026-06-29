@@ -40,10 +40,10 @@ public class IframeFeatureTest {
   @Test
   public void clampFrameDepthBoundsValuesAndDefaults() throws Exception {
     int defDepth = (int) invokeStaticPrivate("clampFrameDepth", new Class[]{int.class}, 0);
-    assertEquals(5, defDepth, "Non-positive depth clamps to default");
+    assertEquals(3, defDepth, "Non-positive depth clamps to default");
 
     int negDepth = (int) invokeStaticPrivate("clampFrameDepth", new Class[]{int.class}, -3);
-    assertEquals(5, negDepth, "Negative depth clamps to default");
+    assertEquals(3, negDepth, "Negative depth clamps to default");
 
     int hugeDepth = (int) invokeStaticPrivate("clampFrameDepth", new Class[]{int.class}, 9999);
     assertEquals(10, hugeDepth, "Huge depth clamps to cap (10)");
@@ -86,7 +86,7 @@ public class IframeFeatureTest {
 
     setField(percy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
     int def = (int) invokePrivate(percy, "resolveMaxFrameDepth", new Class[]{Map.class}, new HashMap<>());
-    assertEquals(5, def);
+    assertEquals(3, def);
   }
 
   @Test
@@ -453,11 +453,11 @@ public class IframeFeatureTest {
   @Test
   public void clampFrameDepthZeroReturnsDocumentedDefault() throws Exception {
     // Semantic regression test: maxIframeDepth=0 must fall back to the
-    // documented default (5), matching @percy/sdk-utils behaviour. Anyone
+    // documented default (3), matching @percy/sdk-utils behaviour. Anyone
     // who later changes this to "0 disables CORS capture" would break
     // cross-SDK alignment — this test guards against the silent flip.
     int fromZero = (int) invokeStaticPrivate("clampFrameDepth", new Class[]{int.class}, 0);
-    assertEquals(5, fromZero, "maxIframeDepth=0 must use the canonical default (5), not disable nested capture");
+    assertEquals(3, fromZero, "maxIframeDepth=0 must use the canonical default (3), not disable nested capture");
   }
 
   @Test
