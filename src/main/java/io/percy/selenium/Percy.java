@@ -368,11 +368,95 @@ public class Percy {
         return (responsiveSnapshotCaptureSDK != null && (boolean) responsiveSnapshotCaptureSDK) || responsiveSnapshotCaptureCLI;
     }
 
+    /**
+     * Recursively convert a parsed JSON value (from org.json) into plain Java
+     * collections so it can participate in a generic deep merge.
+     *
+     * JSONObject -> HashMap&lt;String, Object&gt; (recursively),
+     * JSONArray  -> ArrayList&lt;Object&gt; (recursively converting elements),
+     * anything else (scalars, null) is returned as-is.
+     */
+    @SuppressWarnings("unchecked")
+    private Object jsonToJava(Object value) {
+        if (value instanceof JSONObject) {
+            JSONObject obj = (JSONObject) value;
+            Map<String, Object> map = new HashMap<>();
+            for (String key : obj.keySet()) {
+                Object child = obj.get(key);
+                if (child == JSONObject.NULL) {
+                    child = null;
+                }
+                map.put(key, jsonToJava(child));
+            }
+            return map;
+        } else if (value instanceof JSONArray) {
+            JSONArray arr = (JSONArray) value;
+            List<Object> list = new ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                Object element = arr.get(i);
+                if (element == JSONObject.NULL) {
+                    element = null;
+                }
+                list.add(jsonToJava(element));
+            }
+            return list;
+        }
+        return value;
+    }
+
+    /**
+     * Generic recursive deep merge of two maps. {@code override} wins over
+     * {@code base}. Nested maps are merged recursively; arrays and scalars from
+     * {@code override} replace the corresponding {@code base} value. Null values
+     * in {@code override} are skipped so they never clobber a real config value.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> deepMerge(Map<String, Object> base, Map<String, Object> override) {
+        Map<String, Object> result = new HashMap<>();
+        if (base != null) {
+            result.putAll(base);
+        }
+        if (override == null) {
+            return result;
+        }
+        for (Map.Entry<String, Object> entry : override.entrySet()) {
+            String key = entry.getKey();
+            Object overrideValue = entry.getValue();
+            // Skip null per-call values so they don't clobber config values.
+            if (overrideValue == null) {
+                continue;
+            }
+            Object baseValue = result.get(key);
+            if (baseValue instanceof Map && overrideValue instanceof Map) {
+                result.put(key, deepMerge((Map<String, Object>) baseValue, (Map<String, Object>) overrideValue));
+            } else {
+                result.put(key, overrideValue);
+            }
+        }
+        return result;
+    }
+
     public JSONObject snapshot(String name, Map<String, Object> options) {
         if (!isPercyEnabled) { return null; }
         if ("automate".equals(sessionType)) { throw new RuntimeException("Invalid function call - snapshot(). Please use screenshot() function while using Percy with Automate. For more information on usage of PercyScreenshot, refer https://www.browserstack.com/docs/percy/integrate/functional-and-visual"); }
 
         Object domSnapshot = null;
+
+        // Deep-merge .percy.yml config options with snapshot options (snapshot
+        // options take priority). Nested objects merge recursively, per-call
+        // values win at the leaves, arrays/scalars replace wholesale, and per-call
+        // null values do NOT clobber a real value coming from .percy.yml config.
+        Map<String, Object> baseOptions = new HashMap<>();
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snapshotConfig = cliConfig.getJSONObject("snapshot");
+            Object converted = jsonToJava(snapshotConfig);
+            if (converted instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> convertedMap = (Map<String, Object>) converted;
+                baseOptions = convertedMap;
+            }
+        }
+        Map<String, Object> mergedOptions = deepMerge(baseOptions, options);
 
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
@@ -383,10 +467,10 @@ public class Percy {
             } catch(Exception e) {
                 log("Cookie collection failed " + e.getMessage(), "debug");
             }
-            if (isCaptureResponsiveDOM(options)) {
-                domSnapshot = captureResponsiveDom(driver, cookies, options);
+            if (isCaptureResponsiveDOM(mergedOptions)) {
+                domSnapshot = captureResponsiveDom(driver, cookies, mergedOptions);
             } else {
-                domSnapshot = getSerializedDOM(jse, cookies, options);
+                domSnapshot = getSerializedDOM(jse, cookies, mergedOptions);
             }
         } catch (WebDriverException e) {
             // For some reason, the execution in the browser failed.

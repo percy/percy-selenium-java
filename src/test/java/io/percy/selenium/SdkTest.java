@@ -1185,6 +1185,129 @@ import java.net.URL;
       assertEquals("<html></html>", result.get("html"));
     }
 
+    @Test
+    public void snapshotMergesCliConfigWithPerCallOptionsPrecedence() throws Exception {
+      // .percy.yml config carries a config-only key (enableJavaScript) and a
+      // percyCSS value that the per-call option should override.
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "isPercyEnabled", true);
+      setField(mockedPercy, "domJs",
+          "window.PercyDOM = window.PercyDOM || {}; window.PercyDOM.serialize = function(){ return {}; };");
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot",
+          new JSONObject()
+              .put("enableJavaScript", true)
+              .put("percyCSS", "FROM_CONFIG")));
+      mockedPercy.sessionType = "web";
+
+      when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+      WebDriver.Options mockedOptions = mock(WebDriver.Options.class);
+      when(mockedDriver.manage()).thenReturn(mockedOptions);
+      when(mockedOptions.getCookies()).thenReturn(Collections.emptySet());
+      when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
+
+      // Capture every script passed to the JavascriptExecutor so we can inspect
+      // the PercyDOM.serialize(...) payload that getSerializedDOM builds.
+      ArgumentCaptor<String> scriptCaptor = ArgumentCaptor.forClass(String.class);
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class)))
+          .thenReturn(new HashMap<String, Object>());
+
+      // Avoid an actual POST back to the CLI.
+      doReturn(new JSONObject()).when(mockedPercy)
+          .request(eq("/percy/snapshot"), any(JSONObject.class), eq("merge precedence"));
+
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("percyCSS", "FROM_CALL");
+
+      mockedPercy.snapshot("merge precedence", options);
+
+      verify((JavascriptExecutor) mockedDriver, atLeastOnce()).executeScript(scriptCaptor.capture());
+
+      String serializeScript = null;
+      for (String script : scriptCaptor.getAllValues()) {
+        if (script != null && script.startsWith("return PercyDOM.serialize(")) {
+          serializeScript = script;
+        }
+      }
+      assertNotNull(serializeScript, "PercyDOM.serialize script should have been executed");
+
+      // Extract the JSON argument passed to PercyDOM.serialize(...) and assert
+      // the merged options reflect config<->per-call precedence.
+      String jsonArg = serializeScript
+          .substring(serializeScript.indexOf('(') + 1, serializeScript.lastIndexOf(')'))
+          .trim();
+      JSONObject serialized = new JSONObject(jsonArg);
+
+      // Config-only key survives the merge.
+      assertTrue(serialized.getBoolean("enableJavaScript"),
+          "enableJavaScript from .percy.yml config should be present in serialized options");
+      // Per-call option wins over the config value.
+      assertEquals("FROM_CALL", serialized.getString("percyCSS"),
+          "per-call percyCSS should override the .percy.yml config value");
+    }
+
+    @Test
+    public void snapshotDeepMergesNestedCliConfigWithPerCallOptions() throws Exception {
+      // .percy.yml config carries a nested discovery object; the per-call option
+      // overrides only one nested leaf and must NOT clobber the sibling leaves.
+      RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+      Percy mockedPercy = spy(new Percy(mockedDriver));
+
+      setField(mockedPercy, "isPercyEnabled", true);
+      setField(mockedPercy, "domJs",
+          "window.PercyDOM = window.PercyDOM || {}; window.PercyDOM.serialize = function(){ return {}; };");
+      setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot",
+          new JSONObject().put("discovery",
+              new JSONObject()
+                  .put("networkIdleTimeout", 50)
+                  .put("disableCache", false))));
+      mockedPercy.sessionType = "web";
+
+      when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+      WebDriver.Options mockedOptions = mock(WebDriver.Options.class);
+      when(mockedDriver.manage()).thenReturn(mockedOptions);
+      when(mockedOptions.getCookies()).thenReturn(Collections.emptySet());
+      when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
+
+      ArgumentCaptor<String> scriptCaptor = ArgumentCaptor.forClass(String.class);
+      when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class)))
+          .thenReturn(new HashMap<String, Object>());
+
+      doReturn(new JSONObject()).when(mockedPercy)
+          .request(eq("/percy/snapshot"), any(JSONObject.class), eq("deep merge"));
+
+      Map<String, Object> discoveryOption = new HashMap<String, Object>();
+      discoveryOption.put("disableCache", true);
+      Map<String, Object> options = new HashMap<String, Object>();
+      options.put("discovery", discoveryOption);
+
+      mockedPercy.snapshot("deep merge", options);
+
+      verify((JavascriptExecutor) mockedDriver, atLeastOnce()).executeScript(scriptCaptor.capture());
+
+      String serializeScript = null;
+      for (String script : scriptCaptor.getAllValues()) {
+        if (script != null && script.startsWith("return PercyDOM.serialize(")) {
+          serializeScript = script;
+        }
+      }
+      assertNotNull(serializeScript, "PercyDOM.serialize script should have been executed");
+
+      String jsonArg = serializeScript
+          .substring(serializeScript.indexOf('(') + 1, serializeScript.lastIndexOf(')'))
+          .trim();
+      JSONObject serialized = new JSONObject(jsonArg);
+
+      JSONObject discovery = serialized.getJSONObject("discovery");
+      // Sibling config leaf is preserved (deep merge, not shallow replace).
+      assertEquals(50, discovery.getInt("networkIdleTimeout"),
+          "networkIdleTimeout from .percy.yml config should survive the deep merge");
+      // Per-call leaf wins over the config value.
+      assertTrue(discovery.getBoolean("disableCache"),
+          "per-call discovery.disableCache should override the .percy.yml config value");
+    }
+
     private static Object invokePrivate(Object target, String methodName, Class<?>[] paramTypes, Object... args)
         throws Exception {
       Method method = Percy.class.getDeclaredMethod(methodName, paramTypes);
