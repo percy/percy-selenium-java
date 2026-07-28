@@ -29,9 +29,6 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.util.stream.Collectors;
 
-import javax.swing.text.html.CSS;
-import javax.xml.xpath.XPath;
-
 /**
  * Percy client for visual testing.
  */
@@ -360,8 +357,11 @@ public class Percy {
 
         boolean responsiveSnapshotCaptureCLI = false;
         if (eligibleWidths == null) { return false; }
-        if (cliConfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
-            responsiveSnapshotCaptureCLI = cliConfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snapshotCfg = cliConfig.getJSONObject("snapshot");
+            if (snapshotCfg.has("responsiveSnapshotCapture") && !snapshotCfg.isNull("responsiveSnapshotCapture")) {
+                responsiveSnapshotCaptureCLI = snapshotCfg.getBoolean("responsiveSnapshotCapture");
+            }
         }
         Object responsiveSnapshotCaptureSDK = options.get("responsiveSnapshotCapture");
 
@@ -801,15 +801,39 @@ public class Percy {
         }
     }
 
-    private boolean isUnsupportedIframeSrc(String src) {
-        return src == null || src.isEmpty() ||
-               src.equals("about:blank") ||
-               src.startsWith("javascript:") ||
-               src.startsWith("data:") ||
-               src.startsWith("vbscript:");
+    // Signals that the driver lost its frame context mid-recursion. Any iframes
+    // captured before the failure are attached as `partialCapture` so the top-
+    // level caller can still salvage them instead of throwing away progress.
+    static class PercyContextLostException extends RuntimeException {
+        public List<Map<String, Object>> partialCapture;
+        PercyContextLostException(String message, Throwable cause, List<Map<String, Object>> partialCapture) {
+            super(message, cause);
+            this.partialCapture = partialCapture;
+        }
     }
 
-    private String getOrigin(String url) {
+    // Default maximum nesting depth for cross-origin iframe capture. Mirrors the
+    // canonical Percy SDK behaviour — depth 1 is a top-level iframe.
+    private static final int DEFAULT_MAX_FRAME_DEPTH = 3;
+    private static final int MIN_FRAME_DEPTH = 1;
+    private static final int MAX_FRAME_DEPTH_CAP = 10;
+
+    // Mirrors the canonical @percy/sdk-utils UNSUPPORTED_IFRAME_SRCS list
+    // (percy/cli #2319): a null/empty src is unsupported, and the check is a
+    // case-insensitive startsWith over the 15 canonical scheme prefixes.
+    private boolean isUnsupportedIframeSrc(String src) {
+        if (src == null || src.isEmpty()) return true;
+        String s = src.toLowerCase();
+        return s.startsWith("about:") || s.startsWith("chrome:") ||
+               s.startsWith("chrome-extension:") || s.startsWith("devtools:") ||
+               s.startsWith("edge:") || s.startsWith("opera:") ||
+               s.startsWith("view-source:") || s.startsWith("data:") ||
+               s.startsWith("javascript:") || s.startsWith("blob:") ||
+               s.startsWith("vbscript:") || s.startsWith("file:") ||
+               s.startsWith("ws:") || s.startsWith("wss:") || s.startsWith("ftp:");
+    }
+
+    private static String getOrigin(String url) {
         try {
             URI uri = new URI(url);
             String scheme = uri.getScheme();
@@ -821,60 +845,347 @@ public class Percy {
         }
     }
 
-    private Map<String, Object> processFrame(WebElement frameElement, Map<String, Object> options) {
-        // Read attributes while still in parent context — these calls will
-        // fail if made after switchTo().frame().
-        String frameUrl = frameElement.getAttribute("src");
-        if (frameUrl == null) frameUrl = "unknown-src";
-        final String finalFrameUrl = frameUrl;
-        String percyElementId = frameElement.getAttribute("data-percy-element-id");
-        log("processFrame: data-percy-element-id=\"" + percyElementId + "\" for src=\"" + finalFrameUrl + "\"", "debug");
-        if (percyElementId == null || percyElementId.isEmpty()) {
-            log("Skipping frame " + finalFrameUrl + ": no matching percyElementId found", "debug");
-            return null;
-        }
+    // Clamp the configured frame depth to a sane range.
+    //
+    // Semantic note: a value below MIN_FRAME_DEPTH (1) — including 0 and any
+    // negative number — falls back to DEFAULT_MAX_FRAME_DEPTH. This matches
+    // the @percy/sdk-utils canonical behaviour where `maxIframeDepth=0` is
+    // treated as "unset, use default" rather than "disable nested CORS
+    // capture". To disable CORS iframe traversal, callers should rely on
+    // ignoreIframeSelectors or data-percy-ignore — not depth=0. Keeping this
+    // aligned with sdk-utils avoids a breaking-change divergence across SDKs.
+    private static int clampFrameDepth(int depth) {
+        if (depth < MIN_FRAME_DEPTH) return DEFAULT_MAX_FRAME_DEPTH;
+        if (depth > MAX_FRAME_DEPTH_CAP) return MAX_FRAME_DEPTH_CAP;
+        return depth;
+    }
 
-        Map<String, Object> iframeSnapshot = null;
-        try {
-            driver.switchTo().frame(frameElement);
-            JavascriptExecutor jse = (JavascriptExecutor) driver;
-            // Inject Percy DOM into the cross-origin frame context
-            jse.executeScript(domJs);
-            // Serialize inside the frame; enableJavaScript=true is required for CORS iframes
-            Map<String, Object> iframeOptions = new HashMap<>(options);
-            iframeOptions.put("enableJavaScript", true);
-            JSONObject optionsJson = new JSONObject(iframeOptions);
-            iframeSnapshot = (Map<String, Object>) jse.executeScript(
-                "return PercyDOM.serialize(" + optionsJson.toString() + ")"
-            );
-        } catch (Exception e) {
-            log("Failed to process cross-origin frame " + finalFrameUrl + ": " + e.getMessage(), "error");
-            throw new RuntimeException("Failed to process cross-origin frame " + finalFrameUrl, e);
-        } finally {
-            try {
-                driver.switchTo().defaultContent();
-            } catch (Exception err) {
-                throw new FatalIframeException(
-                    "Could not exit iframe context after processing \"" + finalFrameUrl + "\". Driver may be unstable.", err
-                );
+    // Coerce an arbitrary user-provided selector list into a sanitized List<String>.
+    private static List<String> normalizeIgnoreSelectors(Object input) {
+        List<String> result = new ArrayList<>();
+        if (input == null) return result;
+        if (input instanceof List<?>) {
+            for (Object o : (List<?>) input) {
+                if (o instanceof String) {
+                    String s = ((String) o).trim();
+                    if (!s.isEmpty()) result.add(s);
+                }
+            }
+        } else if (input instanceof String) {
+            String s = ((String) input).trim();
+            if (!s.isEmpty()) result.add(s);
+        }
+        return result;
+    }
+
+    private List<String> resolveIgnoreSelectors(Map<String, Object> options) {
+        if (options != null && options.containsKey("ignoreIframeSelectors")) {
+            return normalizeIgnoreSelectors(options.get("ignoreIframeSelectors"));
+        }
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snap = cliConfig.getJSONObject("snapshot");
+            if (snap.has("ignoreIframeSelectors") && !snap.isNull("ignoreIframeSelectors")) {
+                JSONArray arr = snap.optJSONArray("ignoreIframeSelectors");
+                if (arr != null) {
+                    List<Object> out = new ArrayList<>();
+                    for (int i = 0; i < arr.length(); i++) out.add(arr.opt(i));
+                    return normalizeIgnoreSelectors(out);
+                }
+                // A single string value (e.g. "ignoreIframeSelectors": "iframe.ads")
+                // isn't a JSONArray; normalize it the same way the options-map path does.
+                String single = snap.optString("ignoreIframeSelectors", null);
+                if (single != null) return normalizeIgnoreSelectors(single);
             }
         }
+        return Collections.emptyList();
+    }
 
-        Map<String, Object> iframeData = new HashMap<>();
-        iframeData.put("percyElementId", percyElementId);
+    // True if the iframe element matches any of the user-provided ignore selectors.
+    // Selector matching is performed in-browser via Element.matches so any CSS
+    // selector the browser supports is valid; invalid selectors are tolerated.
+    private boolean iframeMatchesIgnoreSelector(WebElement iframe, List<String> selectors) {
+        if (selectors == null || selectors.isEmpty()) return false;
+        try {
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            // Pass the selector list as a script argument rather than interpolating
+            // it into the source — a selector containing a quote or control char
+            // would otherwise break the script literal and throw.
+            String script = "var el = arguments[0]; var selectors = arguments[1];"
+                + "for (var i = 0; i < selectors.length; i++) {"
+                + "  try { if (el.matches(selectors[i])) return true; } catch (e) {}"
+                + "} return false;";
+            Object res = jse.executeScript(script, iframe, selectors);
+            return res instanceof Boolean && (Boolean) res;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
-        Map<String, Object> result = new HashMap<>();
-        result.put("iframeData", iframeData);
-        result.put("iframeSnapshot", iframeSnapshot);
-        result.put("frameUrl", finalFrameUrl);
-        return result;
+    private int resolveMaxFrameDepth(Map<String, Object> options) {
+        Object override = options == null ? null : options.get("maxIframeDepth");
+        if (override instanceof Number) {
+            return clampFrameDepth(((Number) override).intValue());
+        }
+        if (override instanceof String) {
+            try { return clampFrameDepth(Integer.parseInt((String) override)); } catch (NumberFormatException ignore) {}
+        }
+        if (cliConfig != null && cliConfig.has("snapshot") && !cliConfig.isNull("snapshot")) {
+            JSONObject snap = cliConfig.getJSONObject("snapshot");
+            if (snap.has("maxIframeDepth") && !snap.isNull("maxIframeDepth")) {
+                return clampFrameDepth(snap.optInt("maxIframeDepth", DEFAULT_MAX_FRAME_DEPTH));
+            }
+        }
+        return DEFAULT_MAX_FRAME_DEPTH;
+    }
+
+    // Probe a child iframe element for `data-percy-ignore`. Selenium's
+    // getAttribute returns "" for boolean attributes with no value; treat
+    // any non-null result as a positive hit.
+    private boolean childHasDataPercyIgnore(WebElement iframe) {
+        try {
+            return iframe.getAttribute("data-percy-ignore") != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Read document.URL inside the current frame context. Used for the post-switch
+    // sanity check to confirm the iframe actually resolved to a navigable URL.
+    // Only treat a String result as the document URL — otherwise return null so
+    // callers fall back to the parent-side `src` value.
+    private String readCurrentFrameUrl() {
+        try {
+            Object u = ((JavascriptExecutor) driver).executeScript("return document.URL");
+            return (u instanceof String) ? (String) u : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Serialize the current frame context's DOM using PercyDOM.serialize.
+    // enableJavaScript=true is forced so PercyDOM.serialize doesn't recurse into
+    // nested iframes itself — we drive that recursion explicitly.
+    private Map<String, Object> serializeCurrentFrame(Map<String, Object> options) {
+        JavascriptExecutor jse = (JavascriptExecutor) driver;
+        Map<String, Object> iframeOptions = new HashMap<>(options == null ? Collections.emptyMap() : options);
+        iframeOptions.put("enableJavaScript", true);
+        JSONObject optionsJson = new JSONObject(iframeOptions);
+        Object raw = jse.executeScript(
+            "return PercyDOM.serialize(" + optionsJson.toString() + ")"
+        );
+        // PercyDOM.serialize yields null (or a non-object) when @percy/dom failed
+        // to load inside this frame — e.g. a sandboxed CORS document. Return null
+        // so the caller can skip the frame instead of letting a poisoned snapshot
+        // through, mirroring the main-page guard in getSerializedDOM.
+        if (!(raw instanceof Map)) return null;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> snapshot = (Map<String, Object>) raw;
+        return snapshot;
+    }
+
+    // Recursively process a cross-origin iframe tree. From the current driver
+    // frame context, switch into `frameElement`, capture its DOM, enumerate
+    // further cross-origin iframes nested inside it, and recurse. Steps back
+    // to the parent frame on exit so the caller can continue iterating siblings.
+    //
+    // Bounded by `maxFrameDepth` to stop runaway recursion when pages link to
+    // each other. `ancestorUrls` tracks parent frame URLs — if the current
+    // frame's URL is already in the chain we treat it as a cycle and stop
+    // descending. Compares nested-frame origin against the IMMEDIATE PARENT
+    // origin, not the top page origin.
+    private List<Map<String, Object>> processFrameTree(
+        WebElement frameElement,
+        int depth,
+        Set<String> ancestorUrls,
+        Map<String, Object> ctx
+    ) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> options = (Map<String, Object>) ctx.get("options");
+        int maxFrameDepth = (int) ctx.get("maxFrameDepth");
+        @SuppressWarnings("unchecked")
+        List<String> ignoreSelectors = (List<String>) ctx.get("ignoreSelectors");
+
+        String frameSrc = frameElement.getAttribute("src");
+        String percyElementId = frameElement.getAttribute("data-percy-element-id");
+
+        List<Map<String, Object>> collected = new ArrayList<>();
+        if (depth > maxFrameDepth) {
+            log("Reached max iframe nesting depth (" + maxFrameDepth + "); stopping at " + frameSrc, "debug");
+            return collected;
+        }
+        if (ancestorUrls != null && frameSrc != null && ancestorUrls.contains(frameSrc)) {
+            log("Skipping cyclic iframe (" + frameSrc + " appears in ancestor chain)", "debug");
+            return collected;
+        }
+        if (percyElementId == null || percyElementId.isEmpty()) {
+            log("Skipping cross-origin iframe without data-percy-element-id: " + frameSrc, "debug");
+            return collected;
+        }
+
+        boolean switchedIn = false;
+        try {
+            log("Processing cross-origin iframe (depth " + depth + "): " + frameSrc, "debug");
+            driver.switchTo().frame(frameElement);
+            switchedIn = true;
+
+            JavascriptExecutor jse = (JavascriptExecutor) driver;
+            jse.executeScript(domJs);
+
+            // Post-switch URL re-check: this is the only place we know what the
+            // browser actually navigated to. If it's an unsupported scheme,
+            // bail before serializing.
+            String postSwitchUrl = readCurrentFrameUrl();
+            if (postSwitchUrl != null && isUnsupportedIframeSrc(postSwitchUrl)) {
+                log("Skipping iframe after switch: unsupported document.URL \"" + postSwitchUrl + "\"", "debug");
+                return collected;
+            }
+
+            // Absolute-URL cycle re-check. The pre-switch guard above compares the
+            // raw `src` attribute, which can be relative; a cycle expressed as a
+            // relative src at one level and an absolute URL at another would slip
+            // past it. document.URL here is the resolved absolute URL, and the
+            // ancestor set is seeded with each level's absolute reportedUrl, so
+            // this catches the cycle reliably regardless of how src was written.
+            if (ancestorUrls != null && postSwitchUrl != null && ancestorUrls.contains(postSwitchUrl)) {
+                log("Skipping cyclic iframe (resolved URL " + postSwitchUrl + " appears in ancestor chain)", "debug");
+                return collected;
+            }
+
+            // Expose closed shadow roots inside this CORS frame's document
+            // before serializing — mirrors the top-page behaviour so closed
+            // shadow DOM inside cross-origin iframes is also captured.
+            // CDP DOM.getDocument is invoked at depth=-1 with pierce=true, and
+            // contentDocument subtrees are skipped during collection so this
+            // remains scoped to the host element-level pairs visible from the
+            // current driver session. Non-fatal — wrapped in try/catch so a
+            // non-Chromium driver or restricted frame falls through silently.
+            // TODO(closed-shadow-cors): drive per-frame CDP via flat sessions
+            // (Target.setAutoAttach / sessionId) for deeper isolation when
+            // Selenium 4 BiDi support stabilises across versions.
+            try { exposeClosedShadowRoots(driver); } catch (Exception ignore) {}
+
+            Map<String, Object> iframeSnapshot = serializeCurrentFrame(options);
+            String reportedUrl = (postSwitchUrl != null) ? postSwitchUrl : frameSrc;
+
+            // serializeCurrentFrame returns null when PercyDOM.serialize did not
+            // produce a DOM object (script failed to load in this frame). Skip the
+            // frame rather than emitting an entry with a null snapshot, which the
+            // CLI would otherwise have to defend against.
+            if (iframeSnapshot == null) {
+                log("PercyDOM.serialize returned null inside CORS iframe " + reportedUrl + "; skipping", "warn");
+                return collected;
+            }
+
+            Map<String, Object> iframeData = new HashMap<>();
+            iframeData.put("percyElementId", percyElementId);
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("iframeData", iframeData);
+            entry.put("iframeSnapshot", iframeSnapshot);
+            entry.put("frameUrl", reportedUrl);
+            collected.add(entry);
+
+            // Descend into further cross-origin iframes nested inside this one.
+            // Same-origin descendants are already inlined as srcdoc by PercyDOM.
+            if (depth < maxFrameDepth) {
+                String currentOrigin = getOrigin(reportedUrl);
+                List<WebElement> childIframes;
+                try {
+                    childIframes = driver.findElements(By.tagName("iframe"));
+                } catch (Exception e) {
+                    log("Could not enumerate nested iframes in " + reportedUrl + ": " + e.getMessage(), "debug");
+                    childIframes = Collections.emptyList();
+                }
+                Set<String> nextAncestors = new HashSet<>(ancestorUrls == null ? Collections.emptySet() : ancestorUrls);
+                if (frameSrc != null) nextAncestors.add(frameSrc);
+                if (reportedUrl != null) nextAncestors.add(reportedUrl);
+
+                for (WebElement child : childIframes) {
+                    String childSrc;
+                    try { childSrc = child.getAttribute("src"); } catch (Exception e) { continue; }
+                    if (isUnsupportedIframeSrc(childSrc)) continue;
+                    if (childHasDataPercyIgnore(child)) {
+                        log("Skipping iframe marked with data-percy-ignore: " + childSrc, "debug");
+                        continue;
+                    }
+                    if (iframeMatchesIgnoreSelector(child, ignoreSelectors)) {
+                        log("Skipping iframe matching ignoreIframeSelectors: " + childSrc, "debug");
+                        continue;
+                    }
+                    String childOrigin;
+                    try {
+                        URI base = new URI(reportedUrl);
+                        URI resolved = base.resolve(childSrc);
+                        childOrigin = getOrigin(resolved.toString());
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    // Compare to the IMMEDIATE PARENT origin, not the page origin.
+                    // Null-safe: getOrigin currently returns "" on parse failure, but a
+                    // child URI resolving to no host (e.g. data:, mailto:, schemeless)
+                    // could yield null in future refactors. Objects.equals avoids any
+                    // NPE escaping to the per-iframe catch.
+                    if (Objects.equals(childOrigin, currentOrigin)) continue;
+
+                    try {
+                        List<Map<String, Object>> nested = processFrameTree(child, depth + 1, nextAncestors, ctx);
+                        if (!nested.isEmpty()) collected.addAll(nested);
+                    } catch (PercyContextLostException ctxLost) {
+                        // Merge any partial capture from the inner level into ours before
+                        // propagating, so the top-level caller can recover everything
+                        // that was successfully serialized prior to the failure.
+                        if (ctxLost.partialCapture != null && !ctxLost.partialCapture.isEmpty()) {
+                            collected.addAll(ctxLost.partialCapture);
+                        }
+                        ctxLost.partialCapture = collected;
+                        throw ctxLost;
+                    } catch (FatalIframeException fatal) {
+                        throw fatal;
+                    } catch (Exception e) {
+                        log("Skipping nested iframe \"" + childSrc + "\" due to error: " + e.getMessage(), "debug");
+                    }
+                }
+            }
+            return collected;
+        } catch (PercyContextLostException ctxLost) {
+            throw ctxLost;
+        } catch (Exception e) {
+            log("Failed to process cross-origin iframe " + frameSrc + ": " + e.getMessage(), "warn");
+            return collected;
+        } finally {
+            if (switchedIn) {
+                // Step up exactly one level so an outer recursion continues from
+                // its own context. If parentFrame fails we have no reliable way
+                // to land in the correct parent — fall back to default content
+                // and signal that the rest of the sibling enumeration would be
+                // unreliable. Partial capture is propagated via the exception.
+                try {
+                    driver.switchTo().parentFrame();
+                } catch (Exception parentErr) {
+                    log("Failed to switch back to parent frame: " + parentErr.getMessage(), "warn");
+                    try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
+                    if (depth > 1) {
+                        throw new PercyContextLostException(
+                            "Lost parent frame context: " + parentErr.getMessage(),
+                            parentErr,
+                            new ArrayList<>(collected)
+                        );
+                    }
+                }
+            }
+        }
     }
 
     Map<String, Object> getSerializedDOM(JavascriptExecutor jse, Set<Cookie> cookies, Map<String, Object> options) {
         // Readiness gate before serialize. Graceful on old CLI.
         Object readinessDiagnostics = waitForReady(jse, options);
 
-        Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
+        Object raw = jse.executeScript(buildSnapshotJS(options));
+        if (!(raw instanceof Map)) {
+            throw new RuntimeException("PercyDOM.serialize returned null or non-object; "
+                + "the @percy/dom script likely failed to load. Aborting snapshot.");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> domSnapshot = (Map<String, Object>) raw;
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
 
@@ -882,33 +1193,62 @@ public class Percy {
         if (readinessDiagnostics != null) {
             mutableSnapshot.put("readiness_diagnostics", readinessDiagnostics);
         }
+
+        // Expose closed shadow roots via CDP (Chromium only) so PercyDOM.serialize
+        // can pierce them through the WeakMap it reads. Non-fatal — skip on errors.
+        try { exposeClosedShadowRoots(driver); } catch (Exception ignore) {}
+
         try {
-            String pageOrigin = getOrigin(driver.getCurrentUrl());
+            String pageUrl = driver.getCurrentUrl();
+            String pageOrigin = getOrigin(pageUrl);
             List<WebElement> iframes = driver.findElements(By.tagName("iframe"));
             if (!iframes.isEmpty() && !domJs.trim().isEmpty()) {
+                int maxFrameDepth = resolveMaxFrameDepth(options);
+                List<String> ignoreSelectors = resolveIgnoreSelectors(options);
+
+                Map<String, Object> ctx = new HashMap<>();
+                ctx.put("options", options);
+                ctx.put("maxFrameDepth", maxFrameDepth);
+                ctx.put("ignoreSelectors", ignoreSelectors);
+
                 List<Map<String, Object>> processedFrames = new ArrayList<>();
                 for (WebElement frame : iframes) {
-                    String frameSrc = frame.getAttribute("src");
-                    if (isUnsupportedIframeSrc(frameSrc)) {
+                    String frameSrc;
+                    try { frameSrc = frame.getAttribute("src"); } catch (Exception e) { continue; }
+                    if (isUnsupportedIframeSrc(frameSrc)) continue;
+                    if (childHasDataPercyIgnore(frame)) {
+                        log("Skipping iframe marked with data-percy-ignore: " + frameSrc, "debug");
+                        continue;
+                    }
+                    if (iframeMatchesIgnoreSelector(frame, ignoreSelectors)) {
+                        log("Skipping iframe matching ignoreIframeSelectors: " + frameSrc, "debug");
                         continue;
                     }
                     String frameOrigin;
                     try {
-                        URI base = new URI(driver.getCurrentUrl());
+                        URI base = new URI(pageUrl);
                         URI resolved = base.resolve(frameSrc);
                         frameOrigin = getOrigin(resolved.toString());
                     } catch (Exception e) {
                         log("Skipping iframe \"" + frameSrc + "\": " + e.getMessage(), "debug");
                         continue;
                     }
-                    if (frameOrigin.equals(pageOrigin)) {
-                        continue;
-                    }
+                    // Null-safe equality — see processFrameTree() for rationale.
+                    if (Objects.equals(frameOrigin, pageOrigin)) continue;
+
+                    Set<String> ancestors = new HashSet<>();
+                    if (pageUrl != null) ancestors.add(pageUrl);
                     try {
-                        Map<String, Object> result = processFrame(frame, options);
-                        if (result != null) {
-                            processedFrames.add(result);
+                        List<Map<String, Object>> nested = processFrameTree(frame, 1, ancestors, ctx);
+                        if (!nested.isEmpty()) processedFrames.addAll(nested);
+                    } catch (PercyContextLostException ctxLost) {
+                        log("Aborting further nested CORS capture due to lost frame context", "warn");
+                        if (ctxLost.partialCapture != null && !ctxLost.partialCapture.isEmpty()) {
+                            processedFrames.addAll(ctxLost.partialCapture);
                         }
+                        // Try to ensure we're back at the top before bailing out of the loop.
+                        try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
+                        break;
                     } catch (FatalIframeException e) {
                         throw e;
                     } catch (Exception e) {
@@ -925,6 +1265,113 @@ public class Percy {
             log("Failed to process cross-origin iframes: " + e.getMessage(), "debug");
         }
         return mutableSnapshot;
+    }
+
+    // Discover closed shadow roots via CDP and expose them on a window-bound
+    // WeakMap that PercyDOM.serialize reads to pierce closed shadow DOM. This is
+    // Chromium-only — wrapped in try/catch so other browsers (or a missing
+    // executeCdpCommand) fall through silently. Three CDP calls per pair:
+    // DOM.getDocument (depth=-1, pierce=true) to discover, then DOM.resolveNode
+    // for host + shadow, then Runtime.callFunctionOn to write the pair into
+    // the WeakMap on the page.
+    @SuppressWarnings("unchecked")
+    private void exposeClosedShadowRoots(WebDriver driver) {
+        if (!(driver instanceof ChromeDriver)) return;
+        ChromeDriver chrome;
+        try { chrome = (ChromeDriver) driver; } catch (ClassCastException e) { return; }
+        // Reuse the same CDP availability guard as changeWindowDimensionAndWait so
+        // ChromeDriver builds/subclasses without executeCdpCommand bail cleanly
+        // rather than relying on the catch below to absorb a NoSuchMethodError.
+        if (!isCdpSupported(chrome)) return;
+        boolean domEnabled = false;
+        try {
+            chrome.executeCdpCommand("DOM.enable", new HashMap<>());
+            domEnabled = true;
+            Map<String, Object> getDocParams = new HashMap<>();
+            getDocParams.put("depth", -1);
+            getDocParams.put("pierce", true);
+            Map<String, Object> doc = chrome.executeCdpCommand("DOM.getDocument", getDocParams);
+            if (doc == null) return;
+            Object rootObj = doc.get("root");
+            if (!(rootObj instanceof Map)) return;
+            List<Map<String, Object>> closedPairs = new ArrayList<>();
+            collectClosedShadowPairs((Map<String, Object>) rootObj, closedPairs);
+            if (closedPairs.isEmpty()) return;
+
+            log("Found " + closedPairs.size() + " closed shadow root(s), exposing via CDP", "debug");
+
+            ((JavascriptExecutor) chrome).executeScript(
+                "window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap();"
+            );
+
+            for (Map<String, Object> pair : closedPairs) {
+                try {
+                    Map<String, Object> hostParams = new HashMap<>();
+                    hostParams.put("backendNodeId", pair.get("hostBackendNodeId"));
+                    Map<String, Object> hostRes = chrome.executeCdpCommand("DOM.resolveNode", hostParams);
+                    Map<String, Object> shadowParams = new HashMap<>();
+                    shadowParams.put("backendNodeId", pair.get("shadowBackendNodeId"));
+                    Map<String, Object> shadowRes = chrome.executeCdpCommand("DOM.resolveNode", shadowParams);
+                    if (hostRes == null || shadowRes == null) continue;
+                    Object hostObj = hostRes.get("object");
+                    Object shadowObj = shadowRes.get("object");
+                    if (!(hostObj instanceof Map) || !(shadowObj instanceof Map)) continue;
+                    Object hostObjectId = ((Map<String, Object>) hostObj).get("objectId");
+                    Object shadowObjectId = ((Map<String, Object>) shadowObj).get("objectId");
+                    if (hostObjectId == null || shadowObjectId == null) continue;
+                    Map<String, Object> callParams = new HashMap<>();
+                    callParams.put("functionDeclaration",
+                        "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }");
+                    callParams.put("objectId", hostObjectId);
+                    List<Map<String, Object>> args = new ArrayList<>();
+                    Map<String, Object> a = new HashMap<>();
+                    a.put("objectId", shadowObjectId);
+                    args.add(a);
+                    callParams.put("arguments", args);
+                    chrome.executeCdpCommand("Runtime.callFunctionOn", callParams);
+                } catch (Exception perPair) {
+                    log("Failed to expose a closed shadow root: " + perPair.getMessage(), "debug");
+                }
+            }
+        } catch (Exception ex) {
+            log("Could not expose closed shadow roots via CDP: " + ex.getMessage(), "debug");
+        } finally {
+            // Release the DOM domain so subsequent commands don't keep emitting
+            // DOM events for this session. Best-effort — we don't care if this
+            // fails (e.g., session already closed).
+            if (domEnabled) {
+                try { chrome.executeCdpCommand("DOM.disable", new HashMap<>()); }
+                catch (Exception ignore) { /* defensive */ }
+            }
+        }
+    }
+
+    // Walk the CDP DOM tree looking for closed shadow roots. Skips nodes that
+    // are themselves child-frame documents — cross-frame closed shadow roots
+    // are not supported (different execution context, no WeakMap there).
+    @SuppressWarnings("unchecked")
+    private static void collectClosedShadowPairs(Map<String, Object> node, List<Map<String, Object>> out) {
+        if (node.containsKey("contentDocument")) return;
+        Object srs = node.get("shadowRoots");
+        if (srs instanceof List<?>) {
+            for (Object sr : (List<?>) srs) {
+                if (!(sr instanceof Map)) continue;
+                Map<String, Object> srMap = (Map<String, Object>) sr;
+                if ("closed".equals(srMap.get("shadowRootType"))) {
+                    Map<String, Object> pair = new HashMap<>();
+                    pair.put("hostBackendNodeId", node.get("backendNodeId"));
+                    pair.put("shadowBackendNodeId", srMap.get("backendNodeId"));
+                    out.add(pair);
+                }
+                collectClosedShadowPairs(srMap, out);
+            }
+        }
+        Object children = node.get("children");
+        if (children instanceof List<?>) {
+            for (Object child : (List<?>) children) {
+                if (child instanceof Map) collectClosedShadowPairs((Map<String, Object>) child, out);
+            }
+        }
     }
 
     private List<String> getElementIdFromElement(List<RemoteWebElement> elements) {

@@ -784,7 +784,7 @@ import java.net.URL;
     }
 
     @Test
-    public void processFrameReturnsNullWhenPercyElementIdMissing() throws Exception {
+    public void processFrameTreeSkipsFrameWhenPercyElementIdMissing() throws Exception {
       RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
       Percy mockedPercy = spy(new Percy(mockedDriver));
 
@@ -792,8 +792,27 @@ import java.net.URL;
       when(iframe.getAttribute("src")).thenReturn("https://cdn.other.com/frame");
       when(iframe.getAttribute("data-percy-element-id")).thenReturn(null);
 
-      Object result = invokePrivate(mockedPercy, "processFrame", new Class[]{WebElement.class, Map.class}, iframe, new HashMap<String, Object>());
-      assertNull(result);
+      // processFrameTree takes (WebElement, int depth, Set<String> ancestorUrls,
+      // Map<String, Object> ctx). Build the minimal ctx the method reads before
+      // bailing on the missing data-percy-element-id attribute.
+      Map<String, Object> ctx = new HashMap<String, Object>();
+      ctx.put("options", new HashMap<String, Object>());
+      ctx.put("maxFrameDepth", 5);
+      ctx.put("ignoreSelectors", Collections.emptyList());
+
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> result = (List<Map<String, Object>>) invokePrivate(
+        mockedPercy,
+        "processFrameTree",
+        new Class[]{WebElement.class, int.class, Set.class, Map.class},
+        iframe,
+        1,
+        new HashSet<String>(),
+        ctx
+      );
+
+      assertNotNull(result);
+      assertTrue(result.isEmpty());
       verify(mockedDriver, never()).switchTo();
     }
 
