@@ -6,10 +6,12 @@ import java.io.IOException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import org.openqa.selenium.WebDriver;
 
 import org.openqa.selenium.remote.*;
+import org.openqa.selenium.remote.http.ClientConfig;
 import static org.mockito.Mockito.*;
 import java.net.URL;
 import java.util.concurrent.ConcurrentHashMap;
@@ -124,5 +126,84 @@ public class CacheTest {
         String result = driverMetadata.getCommandExecutorUrl();
         assertNotNull(result);
         assertTrue(result.contains("NoSuchFieldException") || result.contains("delegate"));
+    }
+
+    // ------------------------------------------------------------------
+    // getCommandExecutorUrl: ClientConfig path (Selenium 4.50+) and the
+    // reflective getAddressOfRemoteServer fallbacks.
+    // ------------------------------------------------------------------
+
+    private static boolean hasClientConfigAccessor() {
+        try {
+            RemoteWebDriver.class.getMethod("getClientConfig");
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
+        }
+    }
+
+    // getClientConfig() only exists on Selenium 4.50+, so it is stubbed through a default answer
+    // to keep this file compiling against the Java 8 profile's older Selenium.
+    private static RemoteWebDriver driverWithClientConfig(String sessionId, ClientConfig config) {
+        RemoteWebDriver driver = mock(RemoteWebDriver.class, invocation ->
+            invocation.getMethod().getName().equals("getClientConfig")
+                ? config
+                : RETURNS_DEFAULTS.answer(invocation));
+        when(driver.getSessionId()).thenReturn(new SessionId(sessionId));
+        return driver;
+    }
+
+    @Test
+    public void testCommandExecutorUrlPrefersClientConfigBaseUri() throws Exception {
+        assumeTrue(hasClientConfigAccessor());
+        Cache.CACHE_MAP.clear();
+        ClientConfig config = ClientConfig.defaultConfig().baseUrl(new URL("https://hub-cloud.browserstack.com/wd/hub"));
+        RemoteWebDriver driver = driverWithClientConfig("client-config-1", config);
+        HttpCommandExecutor executor = mock(HttpCommandExecutor.class);
+        when(driver.getCommandExecutor()).thenReturn(executor);
+
+        String url = new DriverMetadata(driver).getCommandExecutorUrl();
+
+        assertEquals("https://hub-cloud.browserstack.com/wd/hub", url);
+        verifyNoInteractions(executor);
+    }
+
+    @Test
+    public void testCommandExecutorUrlFallsBackToExecutorWithoutBaseUri() throws Exception {
+        assumeTrue(hasClientConfigAccessor());
+        Cache.CACHE_MAP.clear();
+        RemoteWebDriver driver = driverWithClientConfig("client-config-2", ClientConfig.defaultConfig());
+        HttpCommandExecutor executor = new HttpCommandExecutor(new URL("http://localhost:9515"));
+        when(driver.getCommandExecutor()).thenReturn(executor);
+
+        assertEquals("http://localhost:9515", new DriverMetadata(driver).getCommandExecutorUrl());
+    }
+
+    @Test
+    public void testGetAddressOfRemoteServerOnRealExecutor() throws Exception {
+        HttpCommandExecutor executor = new HttpCommandExecutor(new URL("https://hub.example.com/wd/hub"));
+        assertEquals(new URL("https://hub.example.com/wd/hub"), DriverMetadata.getAddressOfRemoteServer(executor));
+    }
+
+    @Test
+    public void testReadRemoteServerFieldMatchesAccessor() throws Exception {
+        HttpCommandExecutor executor = new HttpCommandExecutor(new URL("https://hub.example.com/wd/hub"));
+        assertEquals(new URL("https://hub.example.com/wd/hub"), DriverMetadata.readRemoteServerField(executor));
+    }
+
+    @Test
+    public void testGetAddressOfRemoteServerWrapsInvocationFailure() {
+        HttpCommandExecutor executor = mock(HttpCommandExecutor.class, invocation -> {
+            throw new IllegalStateException("boom");
+        });
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+            () -> DriverMetadata.getAddressOfRemoteServer(executor));
+        assertEquals("boom", e.getCause().getCause().getMessage());
+    }
+
+    @Test
+    public void testReadRemoteServerFieldRejectsOtherExecutors() {
+        assertThrows(RuntimeException.class,
+            () -> DriverMetadata.readRemoteServerField(new BrokenTracedCommandExecutor()));
     }
 }

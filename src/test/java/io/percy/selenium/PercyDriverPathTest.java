@@ -608,6 +608,8 @@ public class PercyDriverPathTest {
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
             when(driver.executeCdpCommand(anyString(), anyMap())).thenReturn(new HashMap<String, Object>());
+            // Selenium 4.50 WebDriverWait reads the capabilities when building its timeout message.
+            when(driver.getCapabilities()).thenReturn(new DesiredCapabilities());
 
             when(driver.getCurrentUrl()).thenReturn("https://example.com");
             when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
@@ -707,6 +709,8 @@ public class PercyDriverPathTest {
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
             when(driver.executeCdpCommand(anyString(), anyMap())).thenReturn(new HashMap<String, Object>());
+            // Selenium 4.50 WebDriverWait reads the capabilities when building its timeout message.
+            when(driver.getCapabilities()).thenReturn(new DesiredCapabilities());
 
             when(driver.getCurrentUrl()).thenReturn("https://example.com");
             when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
