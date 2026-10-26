@@ -34,6 +34,11 @@ public class CacheTest {
     }
 
     @Test
+    public void cacheMapIsConcurrent() {
+        assertTrue(Cache.CACHE_MAP instanceof ConcurrentHashMap);
+    }
+
+    @Test
     public void testSessionId() {
         Cache.CACHE_MAP.clear();
         DriverMetadata driverMetadata = new DriverMetadata((WebDriver) mockedDriver);
