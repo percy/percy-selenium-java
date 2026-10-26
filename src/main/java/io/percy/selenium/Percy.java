@@ -1102,7 +1102,7 @@ public class Percy {
 
     protected static void log(String message, String level) {
         message = LABEL + " " + message;
-        String logJsonString = "{\"message\": \"" + message + "\", \"level\": \"" + level + "\"}";
+        String logJsonString = new JSONObject().put("message", message).put("level", level).toString();
         StringEntity entity = new StringEntity(logJsonString, ContentType.APPLICATION_JSON);
         int timeout = 1000; // 1 second
 
