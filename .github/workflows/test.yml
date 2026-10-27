@@ -28,6 +28,8 @@ jobs:
         run: exit 1
         if: ${{ github.event_name == 'workflow_dispatch' && steps.regex-match.outputs && steps.regex-match.outputs.match == '' }}
       - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@0f62d2ad8407a414cddd4790bed06fd9ebda0f56 # v1
         with:
           java-version: ${{ matrix.java }}
