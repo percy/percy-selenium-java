@@ -491,18 +491,21 @@ public class PercyDriverPathTest {
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
 
-            // The CDP resize bumps an internal counter that executeScript reports
-            // back as window.resizeCount so WebDriverWait resolves immediately.
-            AtomicInteger resizeCount = new AtomicInteger(0);
+            // The CDP override drives what executeScript reports as window.innerWidth.
+            AtomicInteger innerWidth = new AtomicInteger(1024);
             when(driver.executeCdpCommand(eq("Emulation.setDeviceMetricsOverride"), anyMap()))
-                .thenAnswer(inv -> { resizeCount.incrementAndGet(); return new HashMap<String, Object>(); });
+                .thenAnswer(inv -> {
+                    Map<String, Object> params = inv.getArgument(1);
+                    innerWidth.set((Integer) params.get("width"));
+                    return new HashMap<String, Object>();
+                });
 
             when(driver.getCurrentUrl()).thenReturn("https://example.com");
             when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
             when(driver.executeScript(anyString())).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
-                    return (long) resizeCount.get();
+                if (script.equals("return window.innerWidth")) {
+                    return (long) innerWidth.get();
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
                     Map<String, Object> snap = new HashMap<String, Object>();
@@ -520,8 +523,9 @@ public class PercyDriverPathTest {
             assertEquals(2, snapshots.size());
             assertEquals(375, snapshots.get(0).get("width"));
             assertEquals(1280, snapshots.get(1).get("width"));
-            // CDP used for every resize (2 widths + final restore).
-            verify(driver, times(3)).executeCdpCommand(eq("Emulation.setDeviceMetricsOverride"), anyMap());
+            // CDP for each width, then the override is cleared rather than re-applied at the window size.
+            verify(driver, times(2)).executeCdpCommand(eq("Emulation.setDeviceMetricsOverride"), anyMap());
+            verify(driver, times(1)).executeCdpCommand(eq("Emulation.clearDeviceMetricsOverride"), anyMap());
             verify(driverWindow, never()).setSize(any(Dimension.class));
         } finally {
             setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", original);
@@ -548,19 +552,19 @@ public class PercyDriverPathTest {
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
 
-            AtomicInteger resizeCount = new AtomicInteger(0);
+            AtomicInteger innerWidth = new AtomicInteger(1024);
             // CDP throws -> the catch logs and falls back to window().setSize().
             when(driver.executeCdpCommand(anyString(), anyMap()))
                 .thenThrow(new WebDriverException("cdp unsupported"));
-            doAnswer(inv -> { resizeCount.incrementAndGet(); return null; })
+            doAnswer(inv -> { innerWidth.set(((Dimension) inv.getArgument(0)).getWidth()); return null; })
                 .when(driverWindow).setSize(any(Dimension.class));
 
             when(driver.getCurrentUrl()).thenReturn("https://example.com");
             when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
             when(driver.executeScript(anyString())).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
-                    return (long) resizeCount.get();
+                if (script.equals("return window.innerWidth")) {
+                    return (long) innerWidth.get();
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
                     Map<String, Object> snap = new HashMap<String, Object>();
@@ -577,7 +581,8 @@ public class PercyDriverPathTest {
 
             assertEquals(1, snapshots.size());
             // Fallback setSize used for resize + final restore.
-            verify(driverWindow, atLeast(2)).setSize(any(Dimension.class));
+            verify(driverWindow).setSize(new Dimension(375, 768));
+            verify(driverWindow).setSize(new Dimension(1024, 768));
         } finally {
             setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", original);
             server.stop(0);
@@ -586,8 +591,7 @@ public class PercyDriverPathTest {
 
     @Test
     public void captureResponsiveDomTolueratesResizeWaitTimeout() throws Exception {
-        // window.resizeCount never matches -> WebDriverWait times out and the
-        // WebDriverException catch (lines ~893-894) logs but capture continues.
+        // window.innerWidth never matches -> the wait times out, logs, and capture continues.
         HttpServer server = startWidthsConfigServer(
             "{\"widths\":[{\"width\":375}]}", HttpURLConnection.HTTP_OK);
         String original = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
@@ -615,8 +619,8 @@ public class PercyDriverPathTest {
             when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
             when(driver.executeScript(anyString())).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
-                    // Never matches the expected resizeCount -> forces a wait timeout.
+                if (script.equals("return window.innerWidth")) {
+                    // Never matches the requested width -> forces a wait timeout.
                     return 999999L;
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
@@ -683,12 +687,11 @@ public class PercyDriverPathTest {
     // captureResponsiveDom: a non-numeric RESPONSIVE_CAPTURE_SLEEP_TIME makes
     // Integer.parseInt throw inside the sleep block; the shared
     // InterruptedException|NumberFormatException catch (line ~1003) swallows it
-    // and capture proceeds. Also drives the resizeCount==null wait branch
-    // (line ~889) by returning null for window.resizeCount.
+    // and capture proceeds. Also drives the null innerWidth wait branch.
     // ------------------------------------------------------------------
 
     @Test
-    public void captureResponsiveDomHandlesNonNumericSleepAndNullResizeCount() throws Exception {
+    public void captureResponsiveDomHandlesNonNumericSleepAndNullInnerWidth() throws Exception {
         HttpServer server = startWidthsConfigServer(
             "{\"widths\":[{\"width\":375}]}", HttpURLConnection.HTTP_OK);
         String original = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
@@ -716,8 +719,8 @@ public class PercyDriverPathTest {
             when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
             when(driver.executeScript(anyString())).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
-                    // null -> the wait lambda's `resizeCountObj == null` branch returns false.
+                if (script.equals("return window.innerWidth")) {
+                    // null -> the innerWidth poll treats the width as unknown and times out.
                     return null;
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
