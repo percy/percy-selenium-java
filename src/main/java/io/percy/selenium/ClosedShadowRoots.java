@@ -119,7 +119,7 @@ final class ClosedShadowRoots {
             }
             return true;
         } catch (Exception e) {
-            Percy.log("Could not expose closed shadow roots via CDP: " + e.getMessage(), "debug");
+            Percy.log("Could not expose closed shadow roots via CDP, trying the next strategy: " + e.getMessage(), "debug");
             return false;
         }
     }
@@ -194,7 +194,7 @@ final class ClosedShadowRoots {
             }
             return true;
         } catch (Exception e) {
-            Percy.log("Could not expose closed shadow roots via BiDi: " + e.getMessage(), "debug");
+            Percy.log("Could not expose closed shadow roots via BiDi, trying the next strategy: " + e.getMessage(), "debug");
             return false;
         }
     }

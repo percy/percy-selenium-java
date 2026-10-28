@@ -1,6 +1,7 @@
 package io.percy.selenium;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.net.URI;
@@ -12,7 +13,12 @@ import org.openqa.selenium.HasCapabilities;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chromium.HasCdp;
 import org.openqa.selenium.remote.Augmenter;
+import org.openqa.selenium.remote.CommandExecutor;
+import org.openqa.selenium.remote.CommandInfo;
+import org.openqa.selenium.remote.HttpCommandExecutor;
+import org.openqa.selenium.remote.RemoteExecuteMethod;
 import org.openqa.selenium.remote.RemoteWebDriver;
+import org.openqa.selenium.remote.http.HttpMethod;
 
 /**
  * Feature detection for the browser protocols the SDK can drive: Chromium CDP, WebDriver BiDi and
@@ -36,10 +42,14 @@ final class BrowserSupport {
     // Augmenting a remote session builds a new proxy class (and, with BiDi, a new WebSocket), so
     // do it once per driver.
     private static final Map<WebDriver, WebDriver> AUGMENTED = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<WebDriver, Cdp> EDGE_CDP = Collections.synchronizedMap(new WeakHashMap<>());
+
+    static final String MS_CDP_COMMAND = "percyMsCdpExecute";
 
     // Test seams.
     static Function<WebDriver, WebDriver> augmenter = d -> new Augmenter().augment(d);
     static Function<WebDriver, BiDi> bidiFactory = BrowserSupport::reflectiveBiDi;
+    static Function<RemoteWebDriver, Cdp> msCdpFactory = BrowserSupport::msCdp;
 
     private BrowserSupport() {}
 
@@ -97,12 +107,101 @@ final class BrowserSupport {
         if (!isChromium(driver)) {
             return null;
         }
-        WebDriver target = driver instanceof HasCdp ? driver : augmented(driver);
+        if (driver instanceof HasCdp) {
+            return ((HasCdp) driver)::executeCdpCommand;
+        }
+        if (driver instanceof RemoteWebDriver && browserName(driver).contains("edge")) {
+            return EDGE_CDP.computeIfAbsent(driver, d -> edgeCdp((RemoteWebDriver) d));
+        }
+        return augmentedCdp(driver);
+    }
+
+    private static Cdp augmentedCdp(WebDriver driver) {
+        WebDriver target = augmented(driver);
         if (!(target instanceof HasCdp)) {
             return null;
         }
         HasCdp hasCdp = (HasCdp) target;
         return hasCdp::executeCdpCommand;
+    }
+
+    // Augmenter's HasCdp posts to goog/cdp/execute whatever the browser (selenium-chrome and
+    // selenium-edge both register the same command name, and goog wins), and msedgedriver rejects
+    // goog. So remote Edge goes to ms/cdp/execute first; goog stays as a fallback for hubs that
+    // only proxy goog, and is kept for the session once it works.
+    private static Cdp edgeCdp(RemoteWebDriver driver) {
+        Cdp ms;
+        try {
+            ms = msCdpFactory.apply(driver);
+        } catch (Throwable e) {
+            Percy.log("Could not register the ms/cdp/execute command: " + e, "debug");
+            ms = null;
+        }
+        if (ms == null) {
+            return augmentedCdp(driver);
+        }
+        final Cdp msCdp = ms;
+        final Cdp[] googCdp = new Cdp[1];
+        return (command, params) -> {
+            if (googCdp[0] != null) {
+                return googCdp[0].execute(command, params);
+            }
+            try {
+                return msCdp.execute(command, params);
+            } catch (RuntimeException msError) {
+                Cdp goog = augmentedCdp(driver);
+                if (goog == null) {
+                    throw msError;
+                }
+                Map<String, Object> result;
+                try {
+                    result = goog.execute(command, params);
+                } catch (RuntimeException googError) {
+                    throw msError;
+                }
+                googCdp[0] = goog;
+                return result;
+            }
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    static Cdp msCdp(RemoteWebDriver driver) {
+        CommandExecutor executor = httpExecutor(driver.getCommandExecutor());
+        if (!(executor instanceof HttpCommandExecutor)) {
+            return null;
+        }
+        try {
+            // defineCommand is protected, but it is the only way to add an endpoint to a live session.
+            Method define = HttpCommandExecutor.class.getDeclaredMethod("defineCommand", String.class, CommandInfo.class);
+            define.setAccessible(true);
+            define.invoke(executor, MS_CDP_COMMAND, new CommandInfo("/session/:sessionId/ms/cdp/execute", HttpMethod.POST));
+        } catch (ReflectiveOperationException e) {
+            Percy.log("Could not register the ms/cdp/execute command: " + e, "debug");
+            return null;
+        }
+        RemoteExecuteMethod execute = new RemoteExecuteMethod(driver);
+        return (command, params) -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("cmd", command);
+            body.put("params", params);
+            Object result = execute.execute(MS_CDP_COMMAND, body);
+            return result instanceof Map ? (Map<String, Object>) result : Collections.<String, Object>emptyMap();
+        };
+    }
+
+    // RemoteWebDriver wraps its HttpCommandExecutor in a TracedCommandExecutor.
+    static CommandExecutor httpExecutor(CommandExecutor executor) {
+        if (executor != null && executor.getClass().getName().endsWith("TracedCommandExecutor")) {
+            try {
+                Field field = executor.getClass().getDeclaredField("delegate");
+                field.setAccessible(true);
+                return (CommandExecutor) field.get(executor);
+            } catch (ReflectiveOperationException e) {
+                return executor;
+            }
+        }
+        return executor;
     }
 
     /** BiDi only when the user already started the session with webSocketUrl; never requested here. */

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openqa.selenium.NoSuchShadowRootException;
 import org.openqa.selenium.SearchContext;
+import org.openqa.selenium.UnsupportedCommandException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.*;
 public class ClosedShadowRootsTest {
     private Function<WebDriver, WebDriver> originalAugmenter;
     private Function<WebDriver, BrowserSupport.BiDi> originalBiDi;
+    private Function<RemoteWebDriver, BrowserSupport.Cdp> originalMsCdp;
     private boolean originalForce;
     private int originalMax;
 
@@ -28,6 +30,7 @@ public class ClosedShadowRootsTest {
     public void saveHooks() {
         originalAugmenter = BrowserSupport.augmenter;
         originalBiDi = BrowserSupport.bidiFactory;
+        originalMsCdp = BrowserSupport.msCdpFactory;
         originalForce = ClosedShadowRoots.forceClassic;
         originalMax = ClosedShadowRoots.maxHosts;
         BrowserSupport.augmenter = d -> d;
@@ -38,6 +41,7 @@ public class ClosedShadowRootsTest {
     public void restoreHooks() {
         BrowserSupport.augmenter = originalAugmenter;
         BrowserSupport.bidiFactory = originalBiDi;
+        BrowserSupport.msCdpFactory = originalMsCdp;
         ClosedShadowRoots.forceClassic = originalForce;
         ClosedShadowRoots.maxHosts = originalMax;
     }
@@ -225,6 +229,55 @@ public class ClosedShadowRootsTest {
         BrowserSupport.bidiFactory = d -> (method, params) -> { throw new IllegalStateException("no script module"); };
         ClosedShadowRoots.forceClassic = true;
         when(driver.executeScript(contains("querySelectorAll"))).thenReturn("not a list");
+
+        ClosedShadowRoots.expose(driver);
+
+        verify(driver).executeScript(contains("querySelectorAll"));
+    }
+
+    // Remote Edge on a hub that rejects CDP (the Automate failure mode): CDP is available but fails.
+    private static RemoteWebDriver remoteEdgeWithFailingCdp(boolean webSocketUrl) {
+        RemoteWebDriver driver = mock(RemoteWebDriver.class);
+        DesiredCapabilities caps = new DesiredCapabilities();
+        caps.setBrowserName("MicrosoftEdge");
+        if (webSocketUrl) caps.setCapability("webSocketUrl", "wss://hub/session/x/se/bidi");
+        when(driver.getCapabilities()).thenReturn(caps);
+        when(driver.getWindowHandle()).thenReturn("ctx");
+        BrowserSupport.msCdpFactory = d -> (cmd, params) -> { throw new UnsupportedCommandException("unknown command"); };
+        return driver;
+    }
+
+    @Test
+    public void cdpFailureFallsThroughToBiDi() {
+        RemoteWebDriver driver = remoteEdgeWithFailingCdp(true);
+        List<String> sent = new ArrayList<>();
+        BrowserSupport.bidiFactory = d -> (method, params) -> {
+            sent.add(method);
+            return new HashMap<>();
+        };
+        ClosedShadowRoots.forceClassic = true;
+
+        ClosedShadowRoots.expose(driver);
+
+        assertEquals(Collections.singletonList("script.callFunction"), sent);
+        verify(driver, never()).executeScript(anyString());
+    }
+
+    @Test
+    public void cdpFailureWithoutBiDiSkipsClassicOnRemoteSessions() {
+        RemoteWebDriver driver = remoteEdgeWithFailingCdp(false);
+        ClosedShadowRoots.forceClassic = false;
+
+        ClosedShadowRoots.expose(driver);
+
+        verify(driver, never()).executeScript(anyString());
+    }
+
+    @Test
+    public void cdpFailureWithoutBiDiRunsClassicWhenAllowed() {
+        RemoteWebDriver driver = remoteEdgeWithFailingCdp(false);
+        ClosedShadowRoots.forceClassic = true;
+        when(driver.executeScript(contains("querySelectorAll"))).thenReturn(new ArrayList<>());
 
         ClosedShadowRoots.expose(driver);
 
