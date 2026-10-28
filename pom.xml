@@ -38,6 +38,7 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.jupiter.version>5.9.2</junit.jupiter.version>
+    <selenium.version>4.50.0</selenium.version>
   </properties>
 
   <dependencies>
@@ -45,13 +46,16 @@
     <dependency>
       <groupId>org.seleniumhq.selenium</groupId>
       <artifactId>selenium-java</artifactId>
-      <version>4.5.3</version>
+      <version>${selenium.version}</version>
       <scope>provided</scope>
     </dependency>
+    <!-- javax.annotation.Nullable used to arrive through Selenium's Guava; Selenium 4.50 no longer
+         ships it. Annotations are not needed at runtime. -->
     <dependency>
-      <groupId>org.seleniumhq.selenium</groupId>
-      <artifactId>selenium-firefox-driver</artifactId>
-      <version>4.5.3</version>
+      <groupId>com.google.code.findbugs</groupId>
+      <artifactId>jsr305</artifactId>
+      <version>3.0.2</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.json</groupId>
@@ -102,6 +106,20 @@
     </dependency>
 
   </dependencies>
+
+  <profiles>
+    <!-- Selenium 4.14+ needs Java 11, so the Java 8 CI job builds and tests against the last
+         Selenium that still runs there. The SDK resolves newer APIs reflectively. -->
+    <profile>
+      <id>java8</id>
+      <activation>
+        <jdk>1.8</jdk>
+      </activation>
+      <properties>
+        <selenium.version>4.5.3</selenium.version>
+      </properties>
+    </profile>
+  </profiles>
 
   <distributionManagement>
     <snapshotRepository>

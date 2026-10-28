@@ -23,9 +23,8 @@ import javax.annotation.Nullable;
 
 import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chromium.HasCdp;
 import org.openqa.selenium.remote.*;
-import org.openqa.selenium.support.ui.ExpectedCondition;
-import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.util.stream.Collectors;
 
@@ -57,6 +56,8 @@ public class Percy {
     
     private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false").toLowerCase());
     private static final int WIDTHS_CONFIG_TIMEOUT_MS = 30000;
+    static long RESIZE_WAIT_MS = 1000;
+    private static final Set<String> WIDTH_MISMATCH_WARNED = ConcurrentHashMap.newKeySet();
     // for logging
     private static String LABEL = "[\u001b[35m" + (PERCY_DEBUG ? "percy:java" : "percy") + "\u001b[39m]";
 
@@ -874,6 +875,9 @@ public class Percy {
         // Readiness gate before serialize. Graceful on old CLI.
         Object readinessDiagnostics = waitForReady(jse, options);
 
+        if (!isDisableShadowDom(options)) {
+            ClosedShadowRoots.expose(driver);
+        }
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
         mutableSnapshot.put("cookies", cookies);
@@ -927,6 +931,11 @@ public class Percy {
         return mutableSnapshot;
     }
 
+    private boolean isDisableShadowDom(Map<String, Object> options) {
+        Object value = options == null ? null : options.get("disableShadowDOM");
+        return value != null && "true".equalsIgnoreCase(value.toString().trim());
+    }
+
     private List<String> getElementIdFromElement(List<RemoteWebElement> elements) {
         List<String> ignoredElementsArray = new ArrayList<>();
         for (int index = 0; index < elements.size(); index++) {
@@ -946,8 +955,61 @@ public class Percy {
         }
     }
 
-    // Change window dimensions and wait for the resize event
-    private static void changeWindowDimensionAndWait(WebDriver driver, int width, int height, int resizeCount) {
+    enum ViewportMechanism { CDP, BIDI, WINDOW }
+
+    // Per-snapshot option, then .percy.yml snapshot config from the healthcheck, then on.
+    boolean resolveExactResponsiveWidth(Map<String, Object> options) {
+        Object value = options == null ? null : options.get("exactResponsiveWidth");
+        if (value == null && cliConfig != null) {
+            JSONObject snapshotConfig = cliConfig.optJSONObject("snapshot");
+            if (snapshotConfig != null && snapshotConfig.has("exactResponsiveWidth") && !snapshotConfig.isNull("exactResponsiveWidth")) {
+                value = snapshotConfig.get("exactResponsiveWidth");
+            }
+        }
+        if (value == null) {
+            return true;
+        }
+        return !"false".equalsIgnoreCase(value.toString().trim());
+    }
+
+    ViewportMechanism setViewport(WebDriver driver, int width, int height, boolean exact) {
+        if (!exact) {
+            return setLegacyViewport(driver, width, height);
+        }
+        BrowserSupport.Cdp cdp = BrowserSupport.cdp(driver);
+        if (cdp != null) {
+            try {
+                Map<String, Object> params = new HashMap<>();
+                params.put("width", width);
+                params.put("height", height);
+                params.put("deviceScaleFactor", 1);
+                params.put("mobile", false);
+                cdp.execute("Emulation.setDeviceMetricsOverride", params);
+                waitForInnerWidth(driver, width);
+                return ViewportMechanism.CDP;
+            } catch (Exception e) {
+                log("Resizing using CDP failed for width " + width + ": " + e.getMessage(), "debug");
+            }
+        }
+        BrowserSupport.BiDi bidi = BrowserSupport.bidi(driver);
+        if (bidi != null) {
+            try {
+                Map<String, Object> viewport = new HashMap<>();
+                viewport.put("width", width);
+                viewport.put("height", height);
+                bidi.send("browsingContext.setViewport", bidiViewportParams(driver, viewport, 1));
+                waitForInnerWidth(driver, width);
+                return ViewportMechanism.BIDI;
+            } catch (Exception e) {
+                log("Resizing using BiDi failed for width " + width + ": " + e.getMessage(), "debug");
+            }
+        }
+        setWindowWidthExactly(driver, width, height);
+        return ViewportMechanism.WINDOW;
+    }
+
+    // exactResponsiveWidth: false keeps the pre-2.3 mechanism (CDP only on a local ChromeDriver).
+    private ViewportMechanism setLegacyViewport(WebDriver driver, int width, int height) {
         try {
             if (driver instanceof ChromeDriver && isCdpSupported((ChromeDriver) driver)) {
                 Map<String, Object> commandParams = new HashMap<>();
@@ -955,28 +1017,100 @@ public class Percy {
                 commandParams.put("height", height);
                 commandParams.put("deviceScaleFactor", 1);
                 commandParams.put("mobile", false);
-
                 ((ChromeDriver) driver).executeCdpCommand("Emulation.setDeviceMetricsOverride", commandParams);
-            } else {
-                driver.manage().window().setSize(new Dimension(width, height));
+                waitForInnerWidth(driver, width);
+                return ViewportMechanism.CDP;
             }
         } catch (Exception e) {
             log("Resizing using CDP failed, falling back to driver for width " + width + ": " + e.getMessage(), "debug");
-            driver.manage().window().setSize(new Dimension(width, height));
         }
-        // Wait for window resize event using WebDriverWait
-        try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(1));
-            wait.until((ExpectedCondition<Boolean>) d -> {
-                Object resizeCountObj = ((JavascriptExecutor) d).executeScript("return window.resizeCount");
-                if (resizeCountObj == null) {
-                    return false;
+        driver.manage().window().setSize(new Dimension(width, height));
+        waitForInnerWidth(driver, width);
+        return ViewportMechanism.WINDOW;
+    }
+
+    // Window resizes include browser chrome (Edge's border, Windows frames), so correct once by
+    // the measured difference. OS minimum window widths (~500px) still can't be beaten here.
+    private void setWindowWidthExactly(WebDriver driver, int width, int height) {
+        driver.manage().window().setSize(new Dimension(width, height));
+        Long innerWidth = waitForInnerWidth(driver, width);
+        if (innerWidth != null && innerWidth != width) {
+            int corrected = width + (width - innerWidth.intValue());
+            driver.manage().window().setSize(new Dimension(corrected, height));
+            innerWidth = waitForInnerWidth(driver, width);
+        }
+        if (innerWidth != null && innerWidth != width) {
+            String browser = BrowserSupport.browserName(driver);
+            log("Viewport width is " + innerWidth + " instead of " + width + " on " + browser + " after window resize", "debug");
+            if (WIDTH_MISMATCH_WARNED.add(BrowserSupport.sessionKey(driver))) {
+                log("Could not set an exact viewport width of " + width + "px on " + (browser.isEmpty() ? "this browser" : browser)
+                    + " (got " + innerWidth + "px). Start the session with webSocketUrl: true for exact responsive widths.", "warn");
+            }
+        }
+    }
+
+    void clearViewport(WebDriver driver, Set<ViewportMechanism> used, int windowWidth, int windowHeight) {
+        if (used.contains(ViewportMechanism.CDP)) {
+            try {
+                BrowserSupport.Cdp cdp = driver instanceof HasCdp
+                    ? ((HasCdp) driver)::executeCdpCommand : BrowserSupport.cdp(driver);
+                if (cdp != null) {
+                    cdp.execute("Emulation.clearDeviceMetricsOverride", new HashMap<>());
                 }
-                return (resizeCountObj instanceof Number) && ((Number) resizeCountObj).longValue() == resizeCount;
-            });
-        } catch (WebDriverException e) {
-            log("Timed out waiting for window resize event for width " + width, "debug");
+            } catch (Exception e) {
+                log("Could not clear CDP device metrics override: " + e.getMessage(), "debug");
+            }
         }
+        if (used.contains(ViewportMechanism.BIDI)) {
+            try {
+                BrowserSupport.BiDi bidi = BrowserSupport.bidi(driver);
+                if (bidi != null) {
+                    bidi.send("browsingContext.setViewport", bidiViewportParams(driver, null, null));
+                }
+            } catch (Exception e) {
+                log("Could not reset BiDi viewport: " + e.getMessage(), "debug");
+            }
+        }
+        if (used.contains(ViewportMechanism.WINDOW)) {
+            driver.manage().window().setSize(new Dimension(windowWidth, windowHeight));
+        }
+    }
+
+    private static Map<String, Object> bidiViewportParams(WebDriver driver, Map<String, Object> viewport, Integer devicePixelRatio) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("context", driver.getWindowHandle());
+        params.put("viewport", viewport);
+        params.put("devicePixelRatio", devicePixelRatio);
+        return params;
+    }
+
+    private static Long readInnerWidth(WebDriver driver) {
+        try {
+            Object value = ((JavascriptExecutor) driver).executeScript("return window.innerWidth");
+            return value instanceof Number ? ((Number) value).longValue() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Polls window.innerWidth (not a resize-event counter) so the check reflects what the
+    // serializer will see. Returns the last width read, or null if it couldn't be read.
+    private static Long waitForInnerWidth(WebDriver driver, int width) {
+        long deadline = System.currentTimeMillis() + RESIZE_WAIT_MS;
+        Long innerWidth = readInnerWidth(driver);
+        while ((innerWidth == null || innerWidth != width) && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            innerWidth = readInnerWidth(driver);
+        }
+        if (innerWidth == null || innerWidth != width) {
+            log("Timed out waiting for viewport width " + width + " (innerWidth " + innerWidth + ")", "debug");
+        }
+        return innerWidth;
     }
 
     private List<Integer> extractResponsiveWidths(Map<String, Object> options) {
@@ -1051,7 +1185,8 @@ public class Percy {
         int currentHeight = windowSize.getHeight();
         int lastWindowWidth = currentWidth;
         int lastWindowHeight = currentHeight;
-        int resizeCount = 0;
+        boolean exact = resolveExactResponsiveWidth(options);
+        Set<ViewportMechanism> used = EnumSet.noneOf(ViewportMechanism.class);
         JavascriptExecutor jse = (JavascriptExecutor) driver;
         jse.executeScript("PercyDOM.waitForResize()");
         int targetHeight = resolveResponsiveTargetHeight(options, currentHeight);
@@ -1067,9 +1202,10 @@ public class Percy {
                 int heightForWidth = (heightObj instanceof Number) ? ((Number) heightObj).intValue() : targetHeight;
                 log("Final height: " + heightForWidth, "debug");
                 if (lastWindowWidth != width || lastWindowHeight != heightForWidth) {
-                    resizeCount++;
                     log("Resizing window to width " + width + " and height " + heightForWidth, "debug");
-                    changeWindowDimensionAndWait(driver, width, heightForWidth, resizeCount);
+                    ViewportMechanism mechanism = setViewport(driver, width, heightForWidth, exact);
+                    used.add(mechanism);
+                    log("Resized to width " + width + " using " + mechanism.name().toLowerCase(), "debug");
                     lastWindowWidth = width;
                     lastWindowHeight = heightForWidth;
                 }
@@ -1077,7 +1213,6 @@ public class Percy {
                     driver.navigate().refresh();
                     jse.executeScript(fetchPercyDOM());
                     jse.executeScript("PercyDOM.waitForResize()");
-                    resizeCount = 0;
                 }
                 try {
                     if (RESPONSIVE_CAPTURE_SLEEP_TIME != null && !RESPONSIVE_CAPTURE_SLEEP_TIME.isEmpty()) {
@@ -1091,7 +1226,7 @@ public class Percy {
                 domSnapshots.add(domSnapshot);
             }
         } finally {
-            changeWindowDimensionAndWait(driver, currentWidth, currentHeight, resizeCount + 1);
+            clearViewport(driver, used, currentWidth, currentHeight);
         }
         return domSnapshots;
     }

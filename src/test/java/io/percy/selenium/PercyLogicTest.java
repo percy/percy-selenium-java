@@ -634,19 +634,20 @@ public class PercyLogicTest {
             setField(mockedPercy, "domJs", "/* percy */");
             setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
 
-            AtomicInteger changes = new AtomicInteger(0);
+            AtomicInteger changes = new AtomicInteger(1024);
             WebDriver.Options driverOptions = mock(WebDriver.Options.class);
             WebDriver.Window driverWindow = mock(WebDriver.Window.class);
             when(mockedDriver.manage()).thenReturn(driverOptions);
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
-            doAnswer(inv -> { changes.incrementAndGet(); return null; }).when(driverWindow).setSize(any(Dimension.class));
+            doAnswer(inv -> { changes.set(((Dimension) inv.getArgument(0)).getWidth()); return null; })
+                .when(driverWindow).setSize(any(Dimension.class));
 
             when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
             when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
             when(((JavascriptExecutor) mockedDriver).executeScript(anyString())).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
+                if (script.equals("return window.innerWidth")) {
                     return (long) changes.get();
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
