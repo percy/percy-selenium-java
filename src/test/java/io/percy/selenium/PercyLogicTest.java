@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -888,6 +889,41 @@ public class PercyLogicTest {
             setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
             assertDoesNotThrow(() -> Percy.log("hello from test"));
             assertEquals(1, hits.get());
+        } finally {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void logBodyIsValidJsonForSpecialCharacters() throws Exception {
+        final AtomicReference<String> body = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/percy/log", new HttpHandler() {
+            @Override
+            public void handle(HttpExchange exchange) throws IOException {
+                java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                byte[] chunk = new byte[1024];
+                int n;
+                while ((n = exchange.getRequestBody().read(chunk)) != -1) {
+                    buf.write(chunk, 0, n);
+                }
+                body.set(new String(buf.toByteArray(), "UTF-8"));
+                exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, -1);
+                exchange.close();
+            }
+        });
+        server.start();
+
+        String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+        try {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+            String msg = "a \"quoted\" \\ msg\nline";
+            Percy.log(msg);
+            JSONObject json = new JSONObject(body.get());
+            assertTrue(json.getString("message").endsWith(msg));
+            assertEquals("info", json.getString("level"));
+            assertEquals(2, json.length());
         } finally {
             setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
             server.stop(0);
