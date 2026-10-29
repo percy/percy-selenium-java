@@ -23,8 +23,21 @@ jobs:
         server-password: MAVEN_PASSWORD # env variable for token in deploy
         gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }} # Value of the GPG private key to import
         gpg-passphrase: MAVEN_GPG_PASSPHRASE # env variable for GPG private key passphrase
+    # Pin Maven: the runner's 3.10.0 writes maven-metadata-local.xml into the Central staging dir,
+    # and Central rejects the bundle ("Bundle has content that does NOT have a .pom file").
+    - name: Set up Maven 3.9.16
+      env:
+        MAVEN_VERSION: 3.9.16
+        MAVEN_SHA512: 831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6
+      run: |
+        curl -fsSLo "$RUNNER_TEMP/maven.tar.gz" "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+        echo "${MAVEN_SHA512}  $RUNNER_TEMP/maven.tar.gz" | sha512sum -c -
+        tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/apache-maven-${MAVEN_VERSION}/bin" >> "$GITHUB_PATH"
     - name: Publish to Maven Central
-      run: mvn deploy --batch-mode -D skipTests --no-transfer-progress
+      run: |
+        mvn --version
+        mvn deploy --batch-mode -D skipTests --no-transfer-progress
       env:
         MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
         MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
