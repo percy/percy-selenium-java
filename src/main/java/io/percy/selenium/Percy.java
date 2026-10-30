@@ -473,10 +473,12 @@ public class Percy {
                 domSnapshot = getSerializedDOM(jse, cookies, mergedOptions);
             }
         } catch (WebDriverException e) {
-            // For some reason, the execution in the browser failed.
-            log(e.getMessage(), "debug");
+            // DOM capture failed; skip the snapshot rather than post an empty one.
+            log("Snapshot failed for \"" + name + "\": " + e.getMessage(), "error");
+            return null;
         } catch (Exception e) {
-            log("Snapshot failed: " + e.getMessage(), "debug");
+            log("Snapshot failed for \"" + name + "\": " + e.getMessage(), "error");
+            return null;
         }
 
         return postSnapshot(domSnapshot, name, driver.getCurrentUrl(), options);
