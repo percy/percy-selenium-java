@@ -18,6 +18,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nullable;
 
@@ -55,6 +56,12 @@ public class Percy {
 
     private static boolean PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE", "false").toLowerCase());
     
+    // Opt-out of forwarding browser cookies to the CLI (same knob the CLI honours)
+    private static boolean PERCY_DO_NOT_USE_CAPTURED_COOKIES = "true".equalsIgnoreCase(
+        System.getenv().getOrDefault("PERCY_DO_NOT_USE_CAPTURED_COOKIES", "false").trim());
+
+    private static final AtomicBoolean cookieOptOutWarned = new AtomicBoolean(false);
+
     private static boolean PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = Boolean.parseBoolean(System.getenv().getOrDefault("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT", "false").toLowerCase());
     private static final int WIDTHS_CONFIG_TIMEOUT_MS = 30000;
     // for logging
@@ -461,12 +468,7 @@ public class Percy {
         try {
             JavascriptExecutor jse = (JavascriptExecutor) driver;
             jse.executeScript(fetchPercyDOM());
-            Set<Cookie> cookies = new HashSet<>();
-            try {
-                cookies = driver.manage().getCookies();
-            } catch(Exception e) {
-                log("Cookie collection failed " + e.getMessage(), "debug");
-            }
+            Set<Cookie> cookies = collectCookies();
             if (isCaptureResponsiveDOM(mergedOptions)) {
                 domSnapshot = captureResponsiveDom(driver, cookies, mergedOptions);
             } else {
@@ -710,6 +712,35 @@ public class Percy {
     }
 
     /**
+     * Collects the browser cookies the CLI replays during asset discovery.
+     * Returns an empty set when PERCY_DO_NOT_USE_CAPTURED_COOKIES=true, and
+     * never throws.
+     */
+    private Set<Cookie> collectCookies() {
+        if (isCookieForwardingDisabled()) {
+            return new HashSet<>();
+        }
+        try {
+            return driver.manage().getCookies();
+        } catch (Exception e) {
+            log("Cookie collection failed " + e.getMessage(), "debug");
+            return new HashSet<>();
+        }
+    }
+
+    private static boolean isCookieForwardingDisabled() {
+        if (!PERCY_DO_NOT_USE_CAPTURED_COOKIES) {
+            return false;
+        }
+        if (cookieOptOutWarned.compareAndSet(false, true)) {
+            log("Not sending browser cookies to Percy because PERCY_DO_NOT_USE_CAPTURED_COOKIES is set. "
+                + "Pages or assets that need a logged-in session may fail to load during asset discovery, "
+                + "so snapshots can render incorrectly.", "warn");
+        }
+        return true;
+    }
+
+    /**
      * Readiness gate: runs PercyDOM.waitForReady BEFORE serialize.
      *
      * Uses executeAsyncScript with a callback signal. The embedded JS checks
@@ -747,15 +778,17 @@ public class Percy {
             }
         }
         try {
+            // The config is passed as a script argument rather than spliced
+            // into the script source, so its values can never become code.
             String script =
-                "var cfg = " + readinessConfig.toString() + ";"
+                "var cfg = arguments[0];"
                 + "var done = arguments[arguments.length - 1];"
                 + "try {"
                 + "  if (typeof PercyDOM !== 'undefined' && typeof PercyDOM.waitForReady === 'function') {"
                 + "    PercyDOM.waitForReady(cfg).then(function(r){ done(r); }).catch(function(){ done(); });"
                 + "  } else { done(); }"
                 + "} catch (e) { done(); }";
-            return jse.executeAsyncScript(script);
+            return jse.executeAsyncScript(script, readinessConfig.toMap());
         } catch (Exception e) {
             log("waitForReady failed, proceeding to serialize: " + e.getMessage(), "debug");
             return null;
@@ -847,6 +880,11 @@ public class Percy {
             iframeSnapshot = (Map<String, Object>) jse.executeScript(
                 "return PercyDOM.serialize(" + optionsJson.toString() + ")"
             );
+            // PercyDOM.serialize captures the frame's document.cookie; drop it when opted out.
+            if (iframeSnapshot != null && isCookieForwardingDisabled()) {
+                iframeSnapshot = new HashMap<>(iframeSnapshot);
+                iframeSnapshot.remove("cookies");
+            }
         } catch (Exception e) {
             log("Failed to process cross-origin frame " + finalFrameUrl + ": " + e.getMessage(), "error");
             throw new RuntimeException("Failed to process cross-origin frame " + finalFrameUrl, e);
@@ -876,7 +914,7 @@ public class Percy {
 
         Map<String, Object> domSnapshot = (Map<String, Object>) jse.executeScript(buildSnapshotJS(options));
         Map<String, Object> mutableSnapshot = new HashMap<>(domSnapshot);
-        mutableSnapshot.put("cookies", cookies);
+        mutableSnapshot.put("cookies", isCookieForwardingDisabled() ? Collections.<Cookie>emptySet() : cookies);
 
         // Attach readiness diagnostics so the CLI can log timing and pass/fail
         if (readinessDiagnostics != null) {

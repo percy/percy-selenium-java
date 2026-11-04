@@ -23,7 +23,7 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         with:
           text: ${{ github.event.inputs.branch }}
-          regex: '^[a-zA-Z0-9_/\-]+$'
+          regex: '^[A-Za-z0-9][A-Za-z0-9._/-]*$'
       - name: Break on invalid branch name
         run: exit 1
         if: ${{ github.event_name == 'workflow_dispatch' && steps.regex-match.outputs && steps.regex-match.outputs.match == '' }}
@@ -35,7 +35,7 @@ jobs:
           java-version: ${{ matrix.java }}
       - name: Get yarn cache directory path
         id: yarn-cache-dir-path
-        run: echo "::set-output name=dir::$(yarn cache dir)"
+        run: echo "dir=$(yarn cache dir)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
         with:
           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
@@ -47,6 +47,10 @@ jobs:
         env:
           CLI_BRANCH: ${{ github.event.inputs.branch }}
         run: |
+          if ! [[ "$CLI_BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$CLI_BRANCH" == *..* ]]; then
+            echo "Invalid branch name" >&2
+            exit 1
+          fi
           cd /tmp
           git clone --branch "$CLI_BRANCH" --depth 1 https://github.com/percy/cli
           cd cli
@@ -55,7 +59,7 @@ jobs:
           yarn
           yarn build
           yarn global:link
-          cd ${{ github.workspace }} 
+          cd "$GITHUB_WORKSPACE"
           yarn remove @percy/cli && yarn link `echo $PERCY_PACKAGES`
           npx percy --version
       - run: MOZ_HEADLESS=1 npx percy exec -- mvn test

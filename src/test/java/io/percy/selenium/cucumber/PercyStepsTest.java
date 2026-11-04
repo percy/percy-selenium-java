@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.openqa.selenium.WebDriver;
 
-import java.lang.reflect.Field;
 import java.util.*;
 
 class PercyStepsTest {
@@ -38,13 +37,7 @@ class PercyStepsTest {
     }
 
     private void setPercyField(Percy percy) {
-        try {
-            Field field = PercySteps.class.getDeclaredField("percy");
-            field.setAccessible(true);
-            field.set(null, percy);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        PercySteps.setPercy(percy);
     }
 
     // ------------------------------------------------------------------
@@ -544,6 +537,72 @@ class PercyStepsTest {
         // implementation version is returned verbatim.
         String version = invokeGetCucumberVersionWithResolver(() -> "9.9.9");
         assertEquals("9.9.9", version);
+    }
+
+    // ------------------------------------------------------------------
+    // Parallel scenarios: per-thread driver/percy/regions
+    // ------------------------------------------------------------------
+
+    @Test
+    void testSetDriverOnAnotherThreadDoesNotReplaceThisThreadsPercy() throws Exception {
+        PercySteps.setDriver(mockDriver);
+        Percy mine = PercySteps.getPercy();
+
+        Percy[] theirs = new Percy[1];
+        WebDriver otherDriver = mock(WebDriver.class);
+        Thread other = new Thread(() -> {
+            PercySteps.setDriver(otherDriver);
+            theirs[0] = PercySteps.getPercy();
+        });
+        other.start();
+        other.join(30000);
+
+        assertNotNull(theirs[0]);
+        assertNotSame(mine, theirs[0]);
+        assertSame(mine, PercySteps.getPercy());
+    }
+
+    @Test
+    void testThreadWithoutOwnDriverFallsBackToLastSetDriver() throws Exception {
+        PercySteps.setDriver(mockDriver);
+        Percy shared = PercySteps.getPercy();
+
+        Percy[] seen = new Percy[1];
+        Thread other = new Thread(() -> {
+            seen[0] = PercySteps.getPercy();
+            new PercySteps().iHaveAPercyInstance();
+        });
+        other.start();
+        other.join(30000);
+
+        assertSame(shared, seen[0]);
+    }
+
+    @Test
+    void testRegionsDoNotLeakAcrossThreads() throws Exception {
+        Percy otherPercy = mock(Percy.class);
+        Map<String, Object> region = new HashMap<>();
+        region.put("algorithm", "ignore");
+        when(otherPercy.createRegion(anyMap())).thenReturn(region);
+
+        // Another scenario thread creates a region but never snapshots.
+        WebDriver otherDriver = mock(WebDriver.class);
+        Thread other = new Thread(() -> {
+            PercySteps.setDriver(otherDriver);
+            PercySteps.setPercy(otherPercy);
+            new PercySteps().iCreateIgnoreRegionCSS(".ad");
+        });
+        other.start();
+        other.join(30000);
+        verify(otherPercy).createRegion(anyMap());
+
+        initWithMockPercy();
+        steps.iTakeSnapshotWithRegions("Mine");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(mockPercy).snapshot(eq("Mine"), captor.capture());
+        assertFalse(captor.getValue().containsKey("regions"));
     }
 
     @Test

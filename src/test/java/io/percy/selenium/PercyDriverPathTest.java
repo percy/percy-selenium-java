@@ -267,7 +267,7 @@ public class PercyDriverPathTest {
 
         Map<String, Object> diagnostics = new HashMap<String, Object>();
         diagnostics.put("ok", true);
-        when(driver.executeAsyncScript(anyString())).thenReturn(diagnostics);
+        when(driver.executeAsyncScript(anyString(), any())).thenReturn(diagnostics);
 
         Object result = percy.waitForReady((JavascriptExecutor) driver, new HashMap<String, Object>());
         assertEquals(diagnostics, result);
@@ -289,7 +289,7 @@ public class PercyDriverPathTest {
             new JSONObject().put("readiness", new JSONObject().put("timeoutMs", 1000))));
 
         when(driver.manage()).thenThrow(new WebDriverException("no timeouts API"));
-        when(driver.executeAsyncScript(anyString())).thenReturn(null);
+        when(driver.executeAsyncScript(anyString(), any())).thenReturn(null);
 
         Object result = percy.waitForReady((JavascriptExecutor) driver, new HashMap<String, Object>());
         assertNull(result);
@@ -759,6 +759,124 @@ public class PercyDriverPathTest {
         Method method = Percy.class.getDeclaredMethod(methodName, paramTypes);
         method.setAccessible(true);
         return method.invoke(target, args);
+    }
+
+    // ------------------------------------------------------------------
+    // Cookie forwarding: forwarded by default, opt-out via
+    // PERCY_DO_NOT_USE_CAPTURED_COOKIES with a one-time warning.
+    // ------------------------------------------------------------------
+
+    private Percy cookieTestPercy(RemoteWebDriver driver, Set<Cookie> cookies) throws Exception {
+        Percy percy = spy(new Percy(driver));
+        setField(percy, "isPercyEnabled", true);
+        setField(percy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+        setField(percy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
+        percy.sessionType = "web";
+
+        WebDriver.Options options = mock(WebDriver.Options.class);
+        when(driver.manage()).thenReturn(options);
+        when(options.getCookies()).thenReturn(cookies);
+        when(driver.getCurrentUrl()).thenReturn("https://example.com");
+        when(driver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
+        when(((JavascriptExecutor) driver).executeScript(anyString())).thenReturn(new HashMap<String, Object>());
+        return percy;
+    }
+
+    @Test
+    public void snapshotForwardsSessionCookiesByDefault() throws Exception {
+        RemoteWebDriver driver = mock(RemoteWebDriver.class);
+        Set<Cookie> cookies = new HashSet<>(Arrays.asList(
+            new Cookie("session_id", "abc123"), new Cookie("auth_token", "tok")));
+        Percy percy = cookieTestPercy(driver, cookies);
+
+        ArgumentCaptor<JSONObject> bodyCaptor = ArgumentCaptor.forClass(JSONObject.class);
+        doReturn(new JSONObject()).when(percy).request(eq("/percy/snapshot"), bodyCaptor.capture(), eq("cookies_default"));
+
+        percy.snapshot("cookies_default");
+
+        // Round-trip through the wire format the CLI receives.
+        org.json.JSONArray sent = new JSONObject(bodyCaptor.getValue().toString())
+            .getJSONObject("domSnapshot").getJSONArray("cookies");
+        assertEquals(2, sent.length());
+        Map<String, String> byName = new HashMap<>();
+        for (int i = 0; i < sent.length(); i++) {
+            byName.put(sent.getJSONObject(i).getString("name"), sent.getJSONObject(i).getString("value"));
+        }
+        assertEquals("abc123", byName.get("session_id"));
+        assertEquals("tok", byName.get("auth_token"));
+    }
+
+    @Test
+    public void snapshotSendsNoCookiesAndWarnsOnceWhenOptedOut() throws Exception {
+        java.io.PrintStream originalOut = System.out;
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        setStaticField(Percy.class, "PERCY_DO_NOT_USE_CAPTURED_COOKIES", true);
+        Field warned = Percy.class.getDeclaredField("cookieOptOutWarned");
+        warned.setAccessible(true);
+        ((java.util.concurrent.atomic.AtomicBoolean) warned.get(null)).set(false);
+        try {
+            System.setOut(new java.io.PrintStream(buf, true));
+            RemoteWebDriver driver = mock(RemoteWebDriver.class);
+            Set<Cookie> cookies = new HashSet<>(Collections.singletonList(new Cookie("session_id", "abc123")));
+            Percy percy = cookieTestPercy(driver, cookies);
+
+            ArgumentCaptor<JSONObject> bodyCaptor = ArgumentCaptor.forClass(JSONObject.class);
+            doReturn(new JSONObject()).when(percy).request(eq("/percy/snapshot"), bodyCaptor.capture(), anyString());
+
+            percy.snapshot("opt_out_1");
+            percy.snapshot("opt_out_2");
+
+            for (JSONObject body : bodyCaptor.getAllValues()) {
+                assertEquals(0, new JSONObject(body.toString()).getJSONObject("domSnapshot").getJSONArray("cookies").length());
+            }
+            assertEquals(2, bodyCaptor.getAllValues().size());
+            verify(driver.manage(), never()).getCookies();
+
+            // Cookies handed straight to getSerializedDOM are dropped too.
+            Map<String, Object> direct = percy.getSerializedDOM(
+                (JavascriptExecutor) driver, cookies, new HashMap<String, Object>());
+            assertTrue(((Set<?>) direct.get("cookies")).isEmpty());
+        } finally {
+            System.setOut(originalOut);
+            setStaticField(Percy.class, "PERCY_DO_NOT_USE_CAPTURED_COOKIES", false);
+        }
+        String out = buf.toString();
+        String warning = "Not sending browser cookies to Percy because PERCY_DO_NOT_USE_CAPTURED_COOKIES is set. "
+            + "Pages or assets that need a logged-in session may fail to load during asset discovery, "
+            + "so snapshots can render incorrectly.";
+        assertEquals(1, out.split(java.util.regex.Pattern.quote(warning), -1).length - 1, out);
+    }
+
+    // ------------------------------------------------------------------
+    // waitForReady: readiness config travels as a script argument.
+    // ------------------------------------------------------------------
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void waitForReadyPassesConfigAsScriptArgument() throws Exception {
+        RemoteWebDriver driver = mock(RemoteWebDriver.class);
+        Percy percy = spy(new Percy(driver));
+        String payload = "custom\"}; window.__pwned = 1; var _={\"x";
+        setField(percy, "cliConfig", new JSONObject().put("snapshot",
+            new JSONObject().put("readiness", new JSONObject().put("preset", payload))));
+
+        Map<String, Object> perSnapshot = new HashMap<>();
+        perSnapshot.put("stabilityWindowMs", 100);
+        Map<String, Object> options = new HashMap<>();
+        options.put("readiness", perSnapshot);
+
+        percy.waitForReady((JavascriptExecutor) driver, options);
+
+        ArgumentCaptor<String> scriptCap = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object> argCap = ArgumentCaptor.forClass(Object.class);
+        verify(driver).executeAsyncScript(scriptCap.capture(), argCap.capture());
+        String script = scriptCap.getValue();
+        assertTrue(script.startsWith("var cfg = arguments[0];"), script);
+        assertFalse(script.contains("__pwned"), script);
+        assertFalse(script.contains("stabilityWindowMs"), script);
+        Map<String, Object> cfg = (Map<String, Object>) argCap.getValue();
+        assertEquals(payload, cfg.get("preset"));
+        assertEquals(100, cfg.get("stabilityWindowMs"));
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {
