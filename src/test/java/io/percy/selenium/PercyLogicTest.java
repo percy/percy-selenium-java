@@ -866,6 +866,103 @@ public class PercyLogicTest {
         }
     }
 
+    @Test
+    public void healthcheckIgnoresUnknownSessionTypeAndMalformedConfig() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/percy/healthcheck", new HttpHandler() {
+            @Override
+            public void handle(HttpExchange exchange) throws IOException {
+                exchange.getResponseHeaders().add("x-percy-core-version", "1.2.3");
+                byte[] body = ("{\"type\":\"bogus\",\"config\":{\"snapshot\":\"not-an-object\","
+                    + "\"percy\":{\"deferUploads\":\"yes\"},\"other\":1}}").getBytes("UTF-8");
+                exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, body.length);
+                try (OutputStream os = exchange.getResponseBody()) { os.write(body); }
+            }
+        });
+        server.start();
+
+        String originalAddress = getStaticStringField(Percy.class, "PERCY_SERVER_ADDRESS");
+        try {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", "http://localhost:" + server.getAddress().getPort());
+            Percy percy = new Percy(mock(RemoteWebDriver.class));
+
+            // Percy stays enabled; only the malformed parts are dropped.
+            assertTrue(getBooleanField(percy, "isPercyEnabled"));
+            assertNull(percy.sessionType);
+            JSONObject config = (JSONObject) getField(percy, "cliConfig");
+            assertFalse(config.has("snapshot"));
+            assertFalse(config.getJSONObject("percy").has("deferUploads"));
+            assertEquals(1, config.getInt("other"));
+        } finally {
+            setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void sanitizeSessionTypeKeepsKnownTypesOnly() {
+        assertEquals("web", Percy.sanitizeSessionType("web"));
+        assertEquals("automate", Percy.sanitizeSessionType("automate"));
+        assertNull(Percy.sanitizeSessionType("Automate"));
+        assertNull(Percy.sanitizeSessionType(1));
+        assertNull(Percy.sanitizeSessionType(JSONObject.NULL));
+        assertNull(Percy.sanitizeSessionType(null));
+    }
+
+    @Test
+    public void sanitizeCliConfigCapsReadinessTimeoutAndKeepsValidValues() {
+        JSONObject capped = Percy.sanitizeCliConfig(new JSONObject()
+            .put("snapshot", new JSONObject().put("readiness",
+                new JSONObject().put("timeoutMs", 86400000L).put("preset", "strict")))
+            .put("percy", new JSONObject().put("deferUploads", true)));
+        JSONObject readiness = capped.getJSONObject("snapshot").getJSONObject("readiness");
+        assertEquals(60000L, readiness.getLong("timeoutMs"));
+        assertEquals("strict", readiness.getString("preset"));
+        assertTrue(capped.getJSONObject("percy").getBoolean("deferUploads"));
+
+        JSONObject kept = Percy.sanitizeCliConfig(new JSONObject()
+            .put("snapshot", new JSONObject().put("readiness", new JSONObject().put("timeoutMs", 5000))));
+        assertEquals(5000, kept.getJSONObject("snapshot").getJSONObject("readiness").getInt("timeoutMs"));
+
+        JSONObject badReadiness = Percy.sanitizeCliConfig(new JSONObject()
+            .put("snapshot", new JSONObject().put("readiness", "not-an-object").put("minHeight", 700)));
+        assertFalse(badReadiness.getJSONObject("snapshot").has("readiness"));
+        assertEquals(700, badReadiness.getJSONObject("snapshot").getInt("minHeight"));
+
+        assertNull(Percy.sanitizeCliConfig(null));
+    }
+
+    @Test
+    public void snapshotStillPostsWhenHealthcheckSnapshotConfigIsMalformed() throws Exception {
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+        setField(mockedPercy, "isPercyEnabled", true);
+        setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+        setField(mockedPercy, "eligibleWidths", new JSONObject().put("default", 1280));
+        setField(mockedPercy, "cliConfig",
+            Percy.sanitizeCliConfig(new JSONObject().put("snapshot", "not-an-object")));
+        mockedPercy.sessionType = "web";
+
+        when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+        WebDriver.Options mockedOptions = mock(WebDriver.Options.class);
+        when(mockedDriver.manage()).thenReturn(mockedOptions);
+        when(mockedOptions.getCookies()).thenReturn(Collections.<Cookie>emptySet());
+        when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
+        Map<String, Object> dom = new HashMap<String, Object>();
+        dom.put("html", "<html></html>");
+        when(((JavascriptExecutor) mockedDriver).executeScript(anyString())).thenReturn(dom);
+
+        ArgumentCaptor<JSONObject> payload = ArgumentCaptor.forClass(JSONObject.class);
+        doReturn(new JSONObject().put("name", "malformed_cfg"))
+            .when(mockedPercy).request(eq("/percy/snapshot"), payload.capture(), eq("malformed_cfg"));
+
+        JSONObject data = mockedPercy.snapshot("malformed_cfg");
+        assertEquals("malformed_cfg", data.getString("name"));
+        // A DOM was captured (not an empty snapshot) despite the bad config.
+        assertTrue(payload.getValue().has("domSnapshot"));
+        assertFalse(payload.getValue().isNull("domSnapshot"));
+    }
+
     // ------------------------------------------------------------------
     // log
     // ------------------------------------------------------------------
@@ -1059,6 +1156,12 @@ public class PercyLogicTest {
         Field field = Percy.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         return (boolean) field.get(target);
+    }
+
+    private static Object getField(Object target, String fieldName) throws Exception {
+        Field field = Percy.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private static void setStaticField(Class<?> clazz, String fieldName, Object value) throws Exception {
