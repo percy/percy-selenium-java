@@ -45,6 +45,9 @@ public class Percy {
     // Maybe get the CLI server address
     private static String PERCY_SERVER_ADDRESS = System.getenv().getOrDefault("PERCY_SERVER_ADDRESS", "http://localhost:5338");
 
+    // Upper bound for readiness.timeoutMs, matching the Percy CLI config schema.
+    private static final long MAX_READINESS_TIMEOUT_MS = 60000L;
+
     // Determine if we're debug logging
     private static boolean PERCY_DEBUG = System.getenv().getOrDefault("PERCY_LOGLEVEL", "info").equals("debug");
 
@@ -350,18 +353,16 @@ public class Percy {
     }
     
     private boolean isCaptureResponsiveDOM(Map<String, Object> options) {
-        if (cliConfig.has("percy") && !cliConfig.isNull("percy")) {
-            JSONObject percyProperty = cliConfig.getJSONObject("percy");
-
-            if (percyProperty.has("deferUploads") && !percyProperty.isNull("deferUploads") && percyProperty.getBoolean("deferUploads")) {
-                return false;
-            }
+        JSONObject percyProperty = cliConfig == null ? null : cliConfig.optJSONObject("percy");
+        if (percyProperty != null && percyProperty.optBoolean("deferUploads", false)) {
+            return false;
         }
 
         boolean responsiveSnapshotCaptureCLI = false;
         if (eligibleWidths == null) { return false; }
-        if (cliConfig.getJSONObject("snapshot").has("responsiveSnapshotCapture")) {
-            responsiveSnapshotCaptureCLI = cliConfig.getJSONObject("snapshot").getBoolean("responsiveSnapshotCapture");
+        JSONObject snapshotConfig = cliConfig == null ? null : cliConfig.optJSONObject("snapshot");
+        if (snapshotConfig != null && snapshotConfig.has("responsiveSnapshotCapture")) {
+            responsiveSnapshotCaptureCLI = snapshotConfig.getBoolean("responsiveSnapshotCapture");
         }
         Object responsiveSnapshotCaptureSDK = options.get("responsiveSnapshotCapture");
 
@@ -582,9 +583,9 @@ public class Percy {
             HttpEntity entity = response.getEntity();
             String responseString = EntityUtils.toString(entity, "UTF-8");
             JSONObject responseObject = new JSONObject(responseString);
-            sessionType = (String) responseObject.optString("type", null);
+            sessionType = sanitizeSessionType(responseObject.opt("type"));
             eligibleWidths = responseObject.optJSONObject("widths");
-            cliConfig = responseObject.optJSONObject("config");
+            cliConfig = sanitizeCliConfig(responseObject.optJSONObject("config"));
 
             return true;
         } catch (Exception ex) {
@@ -594,6 +595,60 @@ public class Percy {
 
             return false;
         }
+    }
+
+    /**
+     * Only accept the session types the CLI reports; anything else is treated as
+     * absent, the same as an older CLI that does not report a type.
+     */
+    static String sanitizeSessionType(Object type) {
+        if ("web".equals(type) || "automate".equals(type)) { return (String) type; }
+        if (type != null && type != JSONObject.NULL) {
+            log("Ignoring unknown session type in Percy CLI healthcheck response", "debug");
+        }
+        return null;
+    }
+
+    /**
+     * Drop malformed sections of the healthcheck config instead of letting them
+     * break snapshots, and bound readiness.timeoutMs to the CLI schema maximum.
+     * Snapshots keep running with defaults for anything that is dropped.
+     */
+    static JSONObject sanitizeCliConfig(JSONObject config) {
+        if (config == null) { return null; }
+        for (String key : new String[] { "snapshot", "percy" }) {
+            if (config.has(key) && !(config.opt(key) instanceof JSONObject)) {
+                log("Ignoring malformed '" + key + "' config in Percy CLI healthcheck response", "debug");
+                config.remove(key);
+            }
+        }
+
+        JSONObject percy = config.optJSONObject("percy");
+        if (percy != null && percy.has("deferUploads") && !(percy.opt("deferUploads") instanceof Boolean)) {
+            log("Ignoring malformed 'deferUploads' config in Percy CLI healthcheck response", "debug");
+            percy.remove("deferUploads");
+        }
+
+        JSONObject snapshot = config.optJSONObject("snapshot");
+        if (snapshot != null && snapshot.has("responsiveSnapshotCapture")
+                && !(snapshot.opt("responsiveSnapshotCapture") instanceof Boolean)) {
+            log("Ignoring malformed 'responsiveSnapshotCapture' config in Percy CLI healthcheck response", "debug");
+            snapshot.remove("responsiveSnapshotCapture");
+        }
+        if (snapshot != null && snapshot.has("readiness") && !(snapshot.opt("readiness") instanceof JSONObject)) {
+            log("Ignoring malformed 'readiness' config in Percy CLI healthcheck response", "debug");
+            snapshot.remove("readiness");
+        }
+        JSONObject readiness = snapshot == null ? null : snapshot.optJSONObject("readiness");
+        if (readiness != null && readiness.has("timeoutMs")) {
+            if (!(readiness.opt("timeoutMs") instanceof Number)) {
+                log("Ignoring malformed 'timeoutMs' readiness config in Percy CLI healthcheck response", "debug");
+                readiness.remove("timeoutMs");
+            } else if (readiness.getLong("timeoutMs") > MAX_READINESS_TIMEOUT_MS) {
+                readiness.put("timeoutMs", MAX_READINESS_TIMEOUT_MS);
+            }
+        }
+        return config;
     }
 
     /**
