@@ -630,14 +630,23 @@ public class Percy {
         }
 
         JSONObject snapshot = config.optJSONObject("snapshot");
+        if (snapshot != null && snapshot.has("responsiveSnapshotCapture")
+                && !(snapshot.opt("responsiveSnapshotCapture") instanceof Boolean)) {
+            log("Ignoring malformed 'responsiveSnapshotCapture' config in Percy CLI healthcheck response", "debug");
+            snapshot.remove("responsiveSnapshotCapture");
+        }
         if (snapshot != null && snapshot.has("readiness") && !(snapshot.opt("readiness") instanceof JSONObject)) {
             log("Ignoring malformed 'readiness' config in Percy CLI healthcheck response", "debug");
             snapshot.remove("readiness");
         }
         JSONObject readiness = snapshot == null ? null : snapshot.optJSONObject("readiness");
-        if (readiness != null && readiness.opt("timeoutMs") instanceof Number
-                && readiness.getLong("timeoutMs") > MAX_READINESS_TIMEOUT_MS) {
-            readiness.put("timeoutMs", MAX_READINESS_TIMEOUT_MS);
+        if (readiness != null && readiness.has("timeoutMs")) {
+            if (!(readiness.opt("timeoutMs") instanceof Number)) {
+                log("Ignoring malformed 'timeoutMs' readiness config in Percy CLI healthcheck response", "debug");
+                readiness.remove("timeoutMs");
+            } else if (readiness.getLong("timeoutMs") > MAX_READINESS_TIMEOUT_MS) {
+                readiness.put("timeoutMs", MAX_READINESS_TIMEOUT_MS);
+            }
         }
         return config;
     }

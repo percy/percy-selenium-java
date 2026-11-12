@@ -929,7 +929,41 @@ public class PercyLogicTest {
         assertFalse(badReadiness.getJSONObject("snapshot").has("readiness"));
         assertEquals(700, badReadiness.getJSONObject("snapshot").getInt("minHeight"));
 
+        JSONObject stringTimeout = Percy.sanitizeCliConfig(new JSONObject()
+            .put("snapshot", new JSONObject().put("readiness", new JSONObject().put("timeoutMs", "86400000"))));
+        assertFalse(stringTimeout.getJSONObject("snapshot").getJSONObject("readiness").has("timeoutMs"));
+
         assertNull(Percy.sanitizeCliConfig(null));
+    }
+
+    @Test
+    public void snapshotStillPostsWhenHealthcheckResponsiveFlagIsNotBoolean() throws Exception {
+        RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
+        Percy mockedPercy = spy(new Percy(mockedDriver));
+        setField(mockedPercy, "isPercyEnabled", true);
+        setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
+        setField(mockedPercy, "eligibleWidths", new JSONObject().put("default", 1280));
+        JSONObject config = Percy.sanitizeCliConfig(new JSONObject()
+            .put("snapshot", new JSONObject().put("responsiveSnapshotCapture", 1)));
+        assertFalse(config.getJSONObject("snapshot").has("responsiveSnapshotCapture"));
+        setField(mockedPercy, "cliConfig", config);
+        mockedPercy.sessionType = "web";
+
+        when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
+        WebDriver.Options mockedOptions = mock(WebDriver.Options.class);
+        when(mockedDriver.manage()).thenReturn(mockedOptions);
+        when(mockedOptions.getCookies()).thenReturn(Collections.<Cookie>emptySet());
+        when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.<WebElement>emptyList());
+        Map<String, Object> dom = new HashMap<String, Object>();
+        dom.put("html", "<html></html>");
+        when(((JavascriptExecutor) mockedDriver).executeScript(anyString())).thenReturn(dom);
+
+        ArgumentCaptor<JSONObject> payload = ArgumentCaptor.forClass(JSONObject.class);
+        doReturn(new JSONObject().put("name", "bad_flag"))
+            .when(mockedPercy).request(eq("/percy/snapshot"), payload.capture(), eq("bad_flag"));
+
+        mockedPercy.snapshot("bad_flag");
+        assertTrue(payload.getValue().has("domSnapshot"));
     }
 
     @Test
