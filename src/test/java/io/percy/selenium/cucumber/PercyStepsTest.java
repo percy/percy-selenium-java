@@ -12,6 +12,9 @@ import org.mockito.ArgumentCaptor;
 import org.openqa.selenium.WebDriver;
 
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 class PercyStepsTest {
 
@@ -543,6 +546,21 @@ class PercyStepsTest {
     // Parallel scenarios: per-thread driver/percy/regions
     // ------------------------------------------------------------------
 
+    /** Runs body on a fresh thread and rethrows anything it throws, so worker failures fail the test. */
+    private static void runOnOtherThread(Runnable body) throws Exception {
+        FutureTask<Void> task = new FutureTask<>(body, null);
+        Thread other = new Thread(task);
+        other.start();
+        try {
+            task.get(30, TimeUnit.SECONDS);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Error) throw (Error) cause;
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw e;
+        }
+    }
+
     @Test
     void testSetDriverOnAnotherThreadDoesNotReplaceThisThreadsPercy() throws Exception {
         PercySteps.setDriver(mockDriver);
@@ -550,12 +568,10 @@ class PercyStepsTest {
 
         Percy[] theirs = new Percy[1];
         WebDriver otherDriver = mock(WebDriver.class);
-        Thread other = new Thread(() -> {
+        runOnOtherThread(() -> {
             PercySteps.setDriver(otherDriver);
             theirs[0] = PercySteps.getPercy();
         });
-        other.start();
-        other.join(30000);
 
         assertNotNull(theirs[0]);
         assertNotSame(mine, theirs[0]);
@@ -568,12 +584,10 @@ class PercyStepsTest {
         Percy shared = PercySteps.getPercy();
 
         Percy[] seen = new Percy[1];
-        Thread other = new Thread(() -> {
+        runOnOtherThread(() -> {
             seen[0] = PercySteps.getPercy();
             new PercySteps().iHaveAPercyInstance();
         });
-        other.start();
-        other.join(30000);
 
         assertSame(shared, seen[0]);
     }
@@ -587,13 +601,11 @@ class PercyStepsTest {
 
         // Another scenario thread creates a region but never snapshots.
         WebDriver otherDriver = mock(WebDriver.class);
-        Thread other = new Thread(() -> {
+        runOnOtherThread(() -> {
             PercySteps.setDriver(otherDriver);
             PercySteps.setPercy(otherPercy);
             new PercySteps().iCreateIgnoreRegionCSS(".ad");
         });
-        other.start();
-        other.join(30000);
         verify(otherPercy).createRegion(anyMap());
 
         initWithMockPercy();

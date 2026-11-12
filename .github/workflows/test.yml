@@ -1,12 +1,7 @@
 name: Test
-on: 
+on:
   push:
   workflow_dispatch:
-    inputs:
-      branch:
-        required: false
-        type: string
-        default: master
 permissions:
   contents: read
 jobs:
@@ -18,15 +13,6 @@ jobs:
         java: [8, 11, 17, 21]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions-ecosystem/action-regex-match@9e6c4fb3d5e898f505be7a1fb6e7b0a278f6665b # v2
-        id: regex-match
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        with:
-          text: ${{ github.event.inputs.branch }}
-          regex: '^[A-Za-z0-9][A-Za-z0-9._/-]*$'
-      - name: Break on invalid branch name
-        run: exit 1
-        if: ${{ github.event_name == 'workflow_dispatch' && steps.regex-match.outputs && steps.regex-match.outputs.match == '' }}
       - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2
         with:
           persist-credentials: false
@@ -42,26 +28,6 @@ jobs:
           key: v1/${{ runner.os }}/java-${{ matrix.java }}/${{ hashFiles('**/yarn.lock') }}
           restore-keys: v1/${{ runner.os }}/java-${{ matrix.java }}/
       - run: yarn
-      - name: Set up @percy/cli from git
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        env:
-          CLI_BRANCH: ${{ github.event.inputs.branch }}
-        run: |
-          if ! [[ "$CLI_BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$CLI_BRANCH" == *..* ]]; then
-            echo "Invalid branch name" >&2
-            exit 1
-          fi
-          cd /tmp
-          git clone --branch "$CLI_BRANCH" --depth 1 https://github.com/percy/cli
-          cd cli
-          PERCY_PACKAGES=`find packages -mindepth 1 -maxdepth 1 -type d | sed -e 's/packages/@percy/g' | tr '\n' ' '`
-          git log -1
-          yarn
-          yarn build
-          yarn global:link
-          cd "$GITHUB_WORKSPACE"
-          yarn remove @percy/cli && yarn link `echo $PERCY_PACKAGES`
-          npx percy --version
       - run: MOZ_HEADLESS=1 npx percy exec -- mvn test
         env:
           PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
