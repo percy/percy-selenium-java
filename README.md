@@ -107,6 +107,13 @@ The snapshot method arguments:
   - `sync` - For getting syncronous results https://www.browserstack.com/docs/percy/advanced/sync-comparison-results
   - `responsiveSnapshotCapture` - For capturing snapshot of responsive websites
 
+### Cookies
+
+By default the SDK sends the browser's cookies to the Percy CLI so that pages and assets behind a
+logged-in session load during asset discovery. To stop sending them, set
+`PERCY_DO_NOT_USE_CAPTURED_COOKIES=true`. With this set, assets that need a session may fail to load
+and snapshots can render incorrectly; the SDK logs a warning once when the option is active.
+
 
 ## Upgrading
 

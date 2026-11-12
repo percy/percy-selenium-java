@@ -59,11 +59,51 @@ import java.util.*;
  */
 public class PercySteps {
 
-    private static WebDriver driver;
-    private static Percy percy;
-    private static List<Map<String, Object>> regions = new ArrayList<>();
+    // Driver/Percy pair. Each thread that calls setDriver gets its own pair so
+    // scenarios running in parallel don't overwrite each other. The most recent
+    // pair is also kept as a shared fallback for threads that never called
+    // setDriver themselves (e.g. a driver set once for the whole run).
+    private static final class Session {
+        final WebDriver driver;
+        final Percy percy;
+
+        Session(WebDriver driver, Percy percy) {
+            this.driver = driver;
+            this.percy = percy;
+        }
+    }
+
+    private static final ThreadLocal<Session> threadSession = new ThreadLocal<>();
+    private static volatile Session sharedSession;
+    private static final ThreadLocal<List<Map<String, Object>>> threadRegions =
+        ThreadLocal.withInitial(ArrayList::new);
 
     private static final String CUCUMBER_CLIENT_NAME = "percy-cucumber-java-selenium";
+
+    private static Session currentSession() {
+        Session session = threadSession.get();
+        return session != null ? session : sharedSession;
+    }
+
+    private static void setSession(Session session) {
+        threadSession.set(session);
+        sharedSession = session;
+    }
+
+    private static WebDriver currentDriver() {
+        Session session = currentSession();
+        return session != null ? session.driver : null;
+    }
+
+    private static Percy percy() {
+        Session session = currentSession();
+        return session != null ? session.percy : null;
+    }
+
+    // Package-private seam so tests can swap in a mock Percy for the current thread.
+    static void setPercy(Percy percy) {
+        setSession(new Session(currentDriver(), percy));
+    }
 
     /**
      * Set the WebDriver instance for Percy to use.
@@ -72,8 +112,8 @@ public class PercySteps {
      * @param webDriver the Selenium WebDriver instance
      */
     public static void setDriver(WebDriver webDriver) {
-        driver = webDriver;
-        percy = new Percy(driver);
+        Percy percy = new Percy(webDriver);
+        setSession(new Session(webDriver, percy));
 
         // Identify as Cucumber wrapper in Percy build info
         String sdkVersion = Percy.getSdkVersion();
@@ -116,7 +156,7 @@ public class PercySteps {
      * @return the Percy instance, or null if not initialized
      */
     public static Percy getPercy() {
-        return percy;
+        return percy();
     }
 
     /**
@@ -124,9 +164,9 @@ public class PercySteps {
      * Call this from your Cucumber hooks in teardown.
      */
     public static void reset() {
-        percy = null;
-        driver = null;
-        regions.clear();
+        threadSession.remove();
+        sharedSession = null;
+        threadRegions.remove();
     }
 
     // ------------------------------------------------------------------
@@ -135,12 +175,13 @@ public class PercySteps {
 
     @Given("I have a Percy instance")
     public void iHaveAPercyInstance() {
+        WebDriver driver = currentDriver();
         if (driver == null) {
             throw new IllegalStateException(
                 "WebDriver not set. Call PercySteps.setDriver(driver) in your @Before hook.");
         }
-        if (percy == null) {
-            percy = new Percy(driver);
+        if (percy() == null) {
+            setSession(new Session(driver, new Percy(driver)));
         }
     }
 
@@ -149,7 +190,7 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "ignore");
         params.put("elementCSS", cssSelector);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy ignore region with XPath {string}")
@@ -157,7 +198,7 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "ignore");
         params.put("elementXpath", xpath);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy ignore region with bounding box {int}, {int}, {int}, {int}")
@@ -171,7 +212,7 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "ignore");
         params.put("boundingBox", boundingBox);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy consider region with CSS selector {string}")
@@ -179,7 +220,7 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "standard");
         params.put("elementCSS", cssSelector);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy consider region with CSS selector {string} and diff sensitivity {int}")
@@ -188,7 +229,7 @@ public class PercySteps {
         params.put("algorithm", "standard");
         params.put("elementCSS", cssSelector);
         params.put("diffSensitivity", sensitivity);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy intelliignore region with CSS selector {string}")
@@ -196,7 +237,7 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "intelliignore");
         params.put("elementCSS", cssSelector);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy ignore region with CSS selector {string} and padding {int}")
@@ -205,7 +246,7 @@ public class PercySteps {
         params.put("algorithm", "ignore");
         params.put("elementCSS", cssSelector);
         params.put("padding", padding);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy ignore region with XPath {string} and padding {int}")
@@ -214,7 +255,7 @@ public class PercySteps {
         params.put("algorithm", "ignore");
         params.put("elementXpath", xpath);
         params.put("padding", padding);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy consider region with XPath {string}")
@@ -222,7 +263,7 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "standard");
         params.put("elementXpath", xpath);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy consider region with XPath {string} and diff sensitivity {int}")
@@ -231,7 +272,7 @@ public class PercySteps {
         params.put("algorithm", "standard");
         params.put("elementXpath", xpath);
         params.put("diffSensitivity", sensitivity);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I create a Percy intelliignore region with XPath {string}")
@@ -239,12 +280,12 @@ public class PercySteps {
         Map<String, Object> params = new HashMap<>();
         params.put("algorithm", "intelliignore");
         params.put("elementXpath", xpath);
-        regions.add(percy.createRegion(params));
+        regions().add(percy().createRegion(params));
     }
 
     @Given("I clear Percy regions")
     public void iClearPercyRegions() {
-        regions.clear();
+        regions().clear();
     }
 
     // ------------------------------------------------------------------
@@ -253,115 +294,118 @@ public class PercySteps {
 
     @When("I take a Percy snapshot named {string}")
     public void iTakeSnapshot(String name) {
-        percy.snapshot(name);
+        percy().snapshot(name);
     }
 
     @When("I take a Percy snapshot named {string} with widths {string}")
     public void iTakeSnapshotWithWidths(String name, String widths) {
         Map<String, Object> options = new HashMap<>();
         options.put("widths", parseWidths(widths));
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with min height {int}")
     public void iTakeSnapshotWithMinHeight(String name, int minHeight) {
         Map<String, Object> options = new HashMap<>();
         options.put("minHeight", minHeight);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with Percy CSS {string}")
     public void iTakeSnapshotWithCSS(String name, String percyCSS) {
         Map<String, Object> options = new HashMap<>();
         options.put("percyCSS", percyCSS);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with scope {string}")
     public void iTakeSnapshotWithScope(String name, String scope) {
         Map<String, Object> options = new HashMap<>();
         options.put("scope", scope);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with layout mode")
     public void iTakeSnapshotWithLayout(String name) {
         Map<String, Object> options = new HashMap<>();
         options.put("enableLayout", true);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with JavaScript enabled")
     public void iTakeSnapshotWithJS(String name) {
         Map<String, Object> options = new HashMap<>();
         options.put("enableJavaScript", true);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with labels {string}")
     public void iTakeSnapshotWithLabels(String name, String labels) {
         Map<String, Object> options = new HashMap<>();
         options.put("labels", labels);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with test case {string}")
     public void iTakeSnapshotWithTestCase(String name, String testCase) {
         Map<String, Object> options = new HashMap<>();
         options.put("testCase", testCase);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with Shadow DOM disabled")
     public void iTakeSnapshotWithShadowDomDisabled(String name) {
         Map<String, Object> options = new HashMap<>();
         options.put("disableShadowDom", true);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with responsive capture")
     public void iTakeSnapshotWithResponsiveCapture(String name) {
         Map<String, Object> options = new HashMap<>();
         options.put("responsiveSnapshotCapture", true);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with sync")
     public void iTakeSnapshotWithSync(String name) {
         Map<String, Object> options = new HashMap<>();
         options.put("sync", true);
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with regions")
     public void iTakeSnapshotWithRegions(String name) {
         Map<String, Object> options = new HashMap<>();
+        List<Map<String, Object>> regions = regions();
         if (!regions.isEmpty()) {
             options.put("regions", new ArrayList<>(regions));
             regions.clear();
         }
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with widths {string} and regions")
     public void iTakeSnapshotWithWidthsAndRegions(String name, String widths) {
         Map<String, Object> options = new HashMap<>();
         options.put("widths", parseWidths(widths));
+        List<Map<String, Object>> regions = regions();
         if (!regions.isEmpty()) {
             options.put("regions", new ArrayList<>(regions));
             regions.clear();
         }
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     @When("I take a Percy snapshot named {string} with options:")
     public void iTakeSnapshotWithOptions(String name, Map<String, String> optionsTable) {
         Map<String, Object> options = buildOptions(optionsTable);
+        List<Map<String, Object>> regions = regions();
         if (!regions.isEmpty()) {
             options.put("regions", new ArrayList<>(regions));
             regions.clear();
         }
-        percy.snapshot(name, options);
+        percy().snapshot(name, options);
     }
 
     // ------------------------------------------------------------------
@@ -370,27 +414,29 @@ public class PercySteps {
 
     @When("I take a Percy screenshot named {string}")
     public void iTakeScreenshot(String name) {
-        percy.screenshot(name);
+        percy().screenshot(name);
     }
 
     @When("I take a Percy screenshot named {string} with regions")
     public void iTakeScreenshotWithRegions(String name) {
         Map<String, Object> options = new HashMap<>();
+        List<Map<String, Object>> regions = regions();
         if (!regions.isEmpty()) {
             options.put("regions", new ArrayList<>(regions));
             regions.clear();
         }
-        percy.screenshot(name, options);
+        percy().screenshot(name, options);
     }
 
     @When("I take a Percy screenshot named {string} with options:")
     public void iTakeScreenshotWithOptions(String name, Map<String, String> optionsTable) {
         Map<String, Object> options = buildOptions(optionsTable);
+        List<Map<String, Object>> regions = regions();
         if (!regions.isEmpty()) {
             options.put("regions", new ArrayList<>(regions));
             regions.clear();
         }
-        percy.screenshot(name, options);
+        percy().screenshot(name, options);
     }
 
     // ------------------------------------------------------------------
@@ -399,7 +445,7 @@ public class PercySteps {
 
     @Then("Percy should be enabled")
     public void percyShouldBeEnabled() {
-        if (percy == null) {
+        if (percy() == null) {
             throw new IllegalStateException("Percy instance not initialized.");
         }
         // Percy constructor calls healthcheck; if it fails, snapshots silently no-op.
@@ -409,6 +455,10 @@ public class PercySteps {
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
+
+    private static List<Map<String, Object>> regions() {
+        return threadRegions.get();
+    }
 
     private static List<Integer> parseWidths(String widths) {
         List<Integer> result = new ArrayList<>();
