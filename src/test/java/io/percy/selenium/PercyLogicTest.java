@@ -486,6 +486,26 @@ public class PercyLogicTest {
 
     @Test
     public void getSerializedDomCapturesCrossOriginIframe() throws Exception {
+        Map<String, Object> frame = serializeWithCrossOriginIframe();
+        // Default: the frame's own cookies are kept as PercyDOM returned them.
+        assertEquals("frame_session=1", ((Map<String, Object>) frame.get("iframeSnapshot")).get("cookies"));
+    }
+
+    @Test
+    public void getSerializedDomStripsIframeCookiesWhenOptedOut() throws Exception {
+        setStaticField(Percy.class, "PERCY_DO_NOT_USE_CAPTURED_COOKIES", true);
+        try {
+            Map<String, Object> frame = serializeWithCrossOriginIframe();
+            Map<String, Object> iframeSnapshot = (Map<String, Object>) frame.get("iframeSnapshot");
+            assertFalse(iframeSnapshot.containsKey("cookies"));
+            assertEquals("iframe", iframeSnapshot.get("dom"));
+        } finally {
+            setStaticField(Percy.class, "PERCY_DO_NOT_USE_CAPTURED_COOKIES", false);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> serializeWithCrossOriginIframe() throws Exception {
         RemoteWebDriver mockedDriver = mock(RemoteWebDriver.class);
         Percy mockedPercy = spy(new Percy(mockedDriver));
         setField(mockedPercy, "domJs", "window.PercyDOM = window.PercyDOM || {};");
@@ -506,6 +526,7 @@ public class PercyLogicTest {
         mainSnapshot.put("dom", "main");
         Map<String, Object> iframeSnapshot = new HashMap<String, Object>();
         iframeSnapshot.put("dom", "iframe");
+        iframeSnapshot.put("cookies", "frame_session=1");
 
         when(((JavascriptExecutor) mockedDriver).executeScript(anyString())).thenAnswer(invocation -> {
             String script = invocation.getArgument(0);
@@ -525,6 +546,7 @@ public class PercyLogicTest {
         List<Map<String, Object>> corsIframes = (List<Map<String, Object>>) serialized.get("corsIframes");
         assertEquals(1, corsIframes.size());
         assertEquals("https://cdn.other.com/frame", corsIframes.get(0).get("frameUrl"));
+        return corsIframes.get(0);
     }
 
     @Test
@@ -535,7 +557,7 @@ public class PercyLogicTest {
 
         Map<String, Object> diagnostics = new HashMap<String, Object>();
         diagnostics.put("ok", true);
-        when(((JavascriptExecutor) mockedDriver).executeAsyncScript(anyString())).thenReturn(diagnostics);
+        when(((JavascriptExecutor) mockedDriver).executeAsyncScript(anyString(), any())).thenReturn(diagnostics);
         Map<String, Object> domSnap = new HashMap<String, Object>();
         domSnap.put("html", "<html></html>");
         when(((JavascriptExecutor) mockedDriver).executeScript(anyString())).thenReturn(domSnap);
@@ -563,7 +585,7 @@ public class PercyLogicTest {
         Map<String, Object> result = mockedPercy.getSerializedDOM(
             (JavascriptExecutor) mockedDriver, new HashSet<Cookie>(), options);
 
-        verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(anyString());
+        verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(anyString(), any());
         assertNull(result.get("readiness_diagnostics"));
     }
 
@@ -602,7 +624,7 @@ public class PercyLogicTest {
 
         Object result = mockedPercy.waitForReady((JavascriptExecutor) mockedDriver, options);
         assertNull(result);
-        verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(anyString());
+        verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(anyString(), any());
     }
 
     @Test
@@ -611,7 +633,7 @@ public class PercyLogicTest {
         Percy mockedPercy = spy(new Percy(mockedDriver));
         setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
 
-        when(((JavascriptExecutor) mockedDriver).executeAsyncScript(anyString()))
+        when(((JavascriptExecutor) mockedDriver).executeAsyncScript(anyString(), any()))
             .thenThrow(new RuntimeException("boom"));
 
         Object result = mockedPercy.waitForReady((JavascriptExecutor) mockedDriver, new HashMap<String, Object>());

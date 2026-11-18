@@ -1122,7 +1122,7 @@ import java.net.URL;
       diagnostics.put("ok", true);
       diagnostics.put("timed_out", false);
       // executeAsyncScript (readiness)
-      when(((JavascriptExecutor) mockedDriver).executeAsyncScript(any(String.class))).thenReturn(diagnostics);
+      when(((JavascriptExecutor) mockedDriver).executeAsyncScript(any(String.class), any())).thenReturn(diagnostics);
       // executeScript (serialize + any other sync scripts)
       Map<String, Object> domSnap = new HashMap<>();
       domSnap.put("html", "<html></html>");
@@ -1133,7 +1133,7 @@ import java.net.URL;
 
       // Readiness script was sent via executeAsyncScript
       ArgumentCaptor<String> scriptCap = ArgumentCaptor.forClass(String.class);
-      verify((JavascriptExecutor) mockedDriver, atLeastOnce()).executeAsyncScript(scriptCap.capture());
+      verify((JavascriptExecutor) mockedDriver, atLeastOnce()).executeAsyncScript(scriptCap.capture(), any());
       assertTrue(scriptCap.getValue().contains("waitForReady"),
           "readiness script should mention waitForReady");
       // Diagnostics propagated to the snapshot
@@ -1159,7 +1159,7 @@ import java.net.URL;
           (JavascriptExecutor) mockedDriver, new HashSet<>(), options);
 
       // executeAsyncScript must NOT have been called
-      verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(any(String.class));
+      verify((JavascriptExecutor) mockedDriver, never()).executeAsyncScript(any(String.class), any());
       // serialize still ran; no diagnostics attached
       assertNull(result.get("readiness_diagnostics"));
     }
@@ -1171,7 +1171,7 @@ import java.net.URL;
       setField(mockedPercy, "isPercyEnabled", true);
       setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
 
-      when(((JavascriptExecutor) mockedDriver).executeAsyncScript(any(String.class)))
+      when(((JavascriptExecutor) mockedDriver).executeAsyncScript(any(String.class), any()))
           .thenThrow(new RuntimeException("readiness boom"));
       Map<String, Object> domSnap = new HashMap<>();
       domSnap.put("html", "<html></html>");
