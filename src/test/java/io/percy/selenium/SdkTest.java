@@ -933,21 +933,21 @@ import java.net.URL;
             setField(mockedPercy, "domJs", "/* percy dom */");
             setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
 
-            // Track actual setSize calls so window.resizeCount can echo the right value.
-            AtomicInteger dimensionChangeCount = new AtomicInteger(0);
+            // Track setSize calls so window.innerWidth echoes the last requested width.
+            AtomicInteger dimensionChangeCount = new AtomicInteger(1024);
             WebDriver.Options driverOptions = mock(WebDriver.Options.class);
             WebDriver.Window driverWindow = mock(WebDriver.Window.class);
             when(mockedDriver.manage()).thenReturn(driverOptions);
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
-            doAnswer(inv -> { dimensionChangeCount.incrementAndGet(); return null; })
+            doAnswer(inv -> { dimensionChangeCount.set(((Dimension) inv.getArgument(0)).getWidth()); return null; })
                 .when(driverWindow).setSize(any(Dimension.class));
 
             when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
             when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
             when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
+                if (script.equals("return window.innerWidth")) {
                     return (long) dimensionChangeCount.get();
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
@@ -1010,20 +1010,20 @@ import java.net.URL;
             setField(mockedPercy, "domJs", "/* percy dom */");
             setField(mockedPercy, "cliConfig", new JSONObject().put("snapshot", new JSONObject()));
 
-            AtomicInteger dimensionChangeCount = new AtomicInteger(0);
+            AtomicInteger dimensionChangeCount = new AtomicInteger(1024);
             WebDriver.Options driverOptions = mock(WebDriver.Options.class);
             WebDriver.Window driverWindow = mock(WebDriver.Window.class);
             when(mockedDriver.manage()).thenReturn(driverOptions);
             when(driverOptions.window()).thenReturn(driverWindow);
             when(driverWindow.getSize()).thenReturn(new Dimension(1024, 768));
-            doAnswer(inv -> { dimensionChangeCount.incrementAndGet(); return null; })
+            doAnswer(inv -> { dimensionChangeCount.set(((Dimension) inv.getArgument(0)).getWidth()); return null; })
                 .when(driverWindow).setSize(any(Dimension.class));
 
             when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
             when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
             when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
+                if (script.equals("return window.innerWidth")) {
                     return (long) dimensionChangeCount.get();
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
@@ -1038,12 +1038,8 @@ import java.net.URL;
             options.put("widths", Arrays.asList(1024));
             mockedPercy.captureResponsiveDom(mockedDriver, new HashSet<>(), options);
 
-            // Only the final restore call should fire; no per-width resize.
-            ArgumentCaptor<Dimension> sizeCaptor = ArgumentCaptor.forClass(Dimension.class);
-            verify(driverWindow, times(1)).setSize(sizeCaptor.capture());
-            Dimension restoreSize = sizeCaptor.getValue();
-            assertEquals(1024, restoreSize.getWidth());
-            assertEquals(768,  restoreSize.getHeight());
+            // No per-width resize, so there is nothing to restore either.
+            verify(driverWindow, never()).setSize(any(Dimension.class));
         } finally {
             setStaticField(Percy.class, "PERCY_SERVER_ADDRESS", originalAddress);
             server.stop(0);
@@ -1081,12 +1077,13 @@ import java.net.URL;
             when(mockedDriver.getCurrentUrl()).thenReturn("https://example.com");
             when(mockedDriver.findElements(By.tagName("iframe"))).thenReturn(Collections.emptyList());
 
-            // After each reload resizeCount resets to 0, so the next changeWindowDimensionAndWait
-            // call uses resizeCount=1. Return 1L so the wait resolves without timing out.
+            AtomicInteger innerWidth = new AtomicInteger(1024);
+            doAnswer(inv -> { innerWidth.set(((Dimension) inv.getArgument(0)).getWidth()); return null; })
+                .when(driverWindow).setSize(any(Dimension.class));
             when(((JavascriptExecutor) mockedDriver).executeScript(any(String.class))).thenAnswer(invocation -> {
                 String script = invocation.getArgument(0);
-                if (script.equals("return window.resizeCount")) {
-                    return 1L;
+                if (script.equals("return window.innerWidth")) {
+                    return (long) innerWidth.get();
                 }
                 if (script.startsWith("return PercyDOM.serialize(")) {
                     Map<String, Object> snap = new HashMap<>();
