@@ -126,14 +126,12 @@ public class PercyDriverPathTest {
             .thenThrow(new WebDriverException("script blew up"));
         when(driver.getCurrentUrl()).thenReturn("https://example.com");
 
-        ArgumentCaptor<JSONObject> bodyCaptor = ArgumentCaptor.forClass(JSONObject.class);
         doReturn(new JSONObject().put("name", "wde")).when(percy)
-            .request(eq("/percy/snapshot"), bodyCaptor.capture(), eq("wde"));
+            .request(eq("/percy/snapshot"), any(JSONObject.class), eq("wde"));
 
-        JSONObject data = percy.snapshot("wde");
-        assertEquals("wde", data.getString("name"));
-        // domSnapshot was never produced -> posted as JSON null.
-        assertTrue(bodyCaptor.getValue().isNull("domSnapshot"));
+        // DOM capture failed -> snapshot is skipped, nothing is posted.
+        assertNull(percy.snapshot("wde"));
+        verify(percy, never()).request(eq("/percy/snapshot"), any(JSONObject.class), anyString());
     }
 
     @Test
@@ -153,8 +151,8 @@ public class PercyDriverPathTest {
         doReturn(new JSONObject().put("name", "generic")).when(percy)
             .request(eq("/percy/snapshot"), any(JSONObject.class), eq("generic"));
 
-        JSONObject data = percy.snapshot("generic");
-        assertEquals("generic", data.getString("name"));
+        assertNull(percy.snapshot("generic"));
+        verify(percy, never()).request(eq("/percy/snapshot"), any(JSONObject.class), anyString());
     }
 
     // ------------------------------------------------------------------
